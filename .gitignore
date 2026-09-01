@@ -34,3 +34,4 @@ dist/
 # Test files
 test-cube.mjs
 test-*.mjs
+.env*

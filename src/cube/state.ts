@@ -1,11 +1,14 @@
 // Thin wrapper around cubejs for type-safe, ergonomic access.
 
-import Cube from 'cubejs'
+import * as cubejsNs from 'cubejs'
+// cubejs is CommonJS; Vite ESM interop sometimes drops the default export.
+// Use namespace import and resolve to a robust constructor reference.
+const Cube: any = (cubejsNs as any).default ?? cubejsNs
 
 export type Face = 'U' | 'R' | 'F' | 'D' | 'L' | 'B'
 
 export interface CubeModel {
-  raw: Cube
+  raw: any
 }
 
 export function newCube(): CubeModel {
