@@ -93,10 +93,20 @@ function getLayerInfo(state: CubeState, move: string): LayerInfo | null {
   const layers = (info.wide && state.size === 4)
     ? [outerLayer, outerLayer > 0 ? outerLayer - 1 : outerLayer + 1]
     : [outerLayer]
-  const negate = info.face === 'L' || info.face === 'D' || info.face === 'B'
-  const turns = info.double ? 2 : (info.prime ? 3 : 1)
-  const totalTurns = (negate ? (4 - turns) : turns) as 1 | 2 | 3
-  const angle = -Math.PI / 2 * totalTurns
+
+  // Visual rotation angle (NOT the position-permutation angle).
+  // R/U/F (faces whose normal points in +axis): "no prime" = -90° around +axis = CW from face view.
+  // L/D/B (normal in -axis): "no prime" = +90° around +axis = CW from face view (mirrored on opposite side).
+  // Prime reverses direction. Double = 180°.
+  // 关键：要把"动画旋转"和"position permutation"解耦 — 后者用 totalTurns=3 走 inverse 公式
+  // 给出正确的位置终点，但前者的 angle 必须落在 [-π, π] 范围内，否则 R3F 动画会从 0
+  // 走到 -3π/2，视觉上 cubie 绕远路转 270° 才到位。
+  const faceIsPositive = info.face === 'R' || info.face === 'U' || info.face === 'F'
+  const sign = faceIsPositive ? -1 : 1
+  const turnSign = info.prime ? -1 : 1
+  const magnitude = info.double ? 2 : 1
+  const angle = (Math.PI / 2) * sign * turnSign * magnitude
+
   return { axis, layers, angle }
 }
 
