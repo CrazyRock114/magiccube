@@ -1,7 +1,7 @@
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
-import { newCube, applyMoveInPlace, getStickerString, cloneCube } from '../cube/state'
+import { newCube, applyMoveInPlace, cloneCube } from '../cube/state'
 import { CubeState } from '../cube/state'
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 
 const FACES = [
   { code: 'U', name: 'Up', cn: '上', color: '#f5f5f5', textColor: '#0a0a14', desc: '顶面（朝上）' },
@@ -13,17 +13,30 @@ const FACES = [
 ]
 
 export function Notation() {
+  // demo state 保持"播放完最后一个 move 之后"的状态。点击按钮时先 reset 然后触发
+  // 一次对应 move 的动画 (从 solved 开始)。这样 sticker 颜色不会在动画开始瞬间跳变。
   const [demo, setDemo] = useState<CubeState>(() => newCube(3))
   const [pendingMove, setPendingMove] = useState<string | null>(null)
+  const currentMoveRef = useRef<string | null>(null)
+
+  const onMoveApplied = useCallback(() => {
+    const finished = currentMoveRef.current
+    if (finished) {
+      setDemo(c => {
+        const nc = cloneCube(c)
+        applyMoveInPlace(nc, finished)
+        return nc
+      })
+    }
+    currentMoveRef.current = null
+    setPendingMove(null)
+  }, [])
 
   const showMove = (m: string) => {
-    const c = newCube(3)
-    applyMoveInPlace(c, m)
-    setDemo(c)
+    setDemo(newCube(3))  // 重置到 solved，但**不立即 apply** — 让动画从 solved 开始转
+    currentMoveRef.current = m
     setPendingMove(m)
   }
-
-  const onMoveApplied = () => setPendingMove(null)
 
   return (
     <div className="space-y-8">

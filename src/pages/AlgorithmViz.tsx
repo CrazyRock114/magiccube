@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react'
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
-import { newCube, applyMoveInPlace, getStickerString, isSolved, parseMoves, cloneCube } from '../cube/state'
+import { newCube, applyMoveInPlace, isSolved, parseMoves, cloneCube } from '../cube/state'
 import { CubeState } from '../cube/state'
 import { ALGORITHMS } from '../cube/algorithms'
 
@@ -29,29 +29,37 @@ function MoveStepper({ algorithm }: { algorithm: typeof ALGORITHMS[0] }) {
   const [stepIdx, setStepIdx] = useState(0)
   const [pendingMove, setPendingMove] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // 关键修复：state 在动画开始时**不变**，只由 onMoveApplied 在动画结束时 apply
+  // 这样 stickers 不会在动画开始瞬间跳到终态，而是跟着 group rotation 视觉转动
   const queueRef = useRef<string[]>([])
+  const currentMoveRef = useRef<string | null>(null)
   const moves = parseMoves(algorithm.notation)
 
-  const stepCube = useCallback((idx: number) => {
-    const c = newCube(3)
-    for (let i = 0; i < idx; i++) {
-      applyMoveInPlace(c, moves[i])
+  const triggerNext = useCallback(() => {
+    if (queueRef.current.length === 0) {
+      currentMoveRef.current = null
+      setPendingMove(null)
+      setBusy(false)
+      return
     }
-    return c
-  }, [moves])
+    const next = queueRef.current.shift()!
+    currentMoveRef.current = next
+    setPendingMove(next)
+  }, [])
 
   const onAnimationDone = useCallback(() => {
-    setPendingMove(null)
-    if (queueRef.current.length > 0) {
-      const next = queueRef.current.shift()!
-      const targetIdx = stepIdx + 1
-      setCube(stepCube(targetIdx))
-      setStepIdx(targetIdx)
-      setPendingMove(next)
-    } else {
-      setBusy(false)
+    // 动画结束：apply 当前 move 到 state，stepIdx +1
+    const finishedMove = currentMoveRef.current
+    if (finishedMove) {
+      setCube(c => {
+        const nc = cloneCube(c)
+        applyMoveInPlace(nc, finishedMove)
+        return nc
+      })
     }
-  }, [stepIdx, stepCube])
+    setStepIdx(i => i + 1)
+    triggerNext()
+  }, [triggerNext])
 
   const playAll = () => {
     if (busy) return
@@ -59,25 +67,24 @@ function MoveStepper({ algorithm }: { algorithm: typeof ALGORITHMS[0] }) {
     setCube(newCube(3))
     setStepIdx(0)
     queueRef.current = [...moves]
-    const first = queueRef.current.shift()!
-    setCube(stepCube(1))
-    setStepIdx(1)
-    setPendingMove(first)
+    triggerNext()
   }
 
   const playNext = () => {
     if (busy || stepIdx >= moves.length) return
     setBusy(true)
-    const nextIdx = stepIdx + 1
-    setCube(stepCube(nextIdx))
-    setStepIdx(nextIdx)
-    setPendingMove(moves[stepIdx])
+    queueRef.current = [moves[stepIdx]]
+    triggerNext()
   }
 
   const playPrev = () => {
     if (busy || stepIdx === 0) return
     const nextIdx = stepIdx - 1
-    setCube(stepCube(nextIdx))
+    const c = newCube(3)
+    for (let i = 0; i < nextIdx; i++) {
+      applyMoveInPlace(c, moves[i])
+    }
+    setCube(c)
     setStepIdx(nextIdx)
   }
 
@@ -87,6 +94,7 @@ function MoveStepper({ algorithm }: { algorithm: typeof ALGORITHMS[0] }) {
     setPendingMove(null)
     setBusy(false)
     queueRef.current = []
+    currentMoveRef.current = null
   }
 
   return (

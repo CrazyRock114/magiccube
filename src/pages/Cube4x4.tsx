@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
-import { newCube, applyMoveInPlace, getStickerString, parseMoves, isSolved, cloneCube } from '../cube/state'
+import { newCube, applyMoveInPlace, parseMoves, isSolved, cloneCube } from '../cube/state'
 import { CubeState } from '../cube/state'
 import { ALGORITHMS_4X4 } from '../cube/algorithms'
 
@@ -29,42 +29,46 @@ export function Cube4x4() {
   const [pendingMove, setPendingMove] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const queueRef = useRef<string[]>([])
+  const currentMoveRef = useRef<string | null>(null)
+
+  const triggerNext = useCallback(() => {
+    if (queueRef.current.length === 0) {
+      currentMoveRef.current = null
+      setPendingMove(null)
+      setBusy(false)
+      return
+    }
+    const next = queueRef.current.shift()!
+    currentMoveRef.current = next
+    setPendingMove(next)
+  }, [])
 
   const onMoveApplied = useCallback(() => {
-    setPendingMove(null)
-    if (queueRef.current.length > 0) {
-      const next = queueRef.current.shift()!
+    const finishedMove = currentMoveRef.current
+    if (finishedMove) {
       setCube(c => {
         const nc = cloneCube(c)
-        applyMoveInPlace(nc, next)
+        applyMoveInPlace(nc, finishedMove)
         return nc
       })
-      setPendingMove(next)
-    } else {
-      setBusy(false)
     }
-  }, [])
+    triggerNext()
+  }, [triggerNext])
 
   const doMoves = useCallback((ms: string) => {
     const list = parseMoves(ms)
     if (list.length === 0 || busy) return
     setBusy(true)
     queueRef.current = [...list]
-    const first = queueRef.current.shift()!
-    const nc = cloneCube(cube)
-    applyMoveInPlace(nc, first)
-    setCube(nc)
-    setPendingMove(first)
-  }, [cube, busy])
+    triggerNext()
+  }, [busy, triggerNext])
 
   const doMove = useCallback((m: string) => {
     if (busy) return
     setBusy(true)
-    const nc = cloneCube(cube)
-    applyMoveInPlace(nc, m)
-    setCube(nc)
-    setPendingMove(m)
-  }, [cube, busy])
+    queueRef.current = [m]
+    triggerNext()
+  }, [busy, triggerNext])
 
   return (
     <div className="space-y-6">
@@ -110,7 +114,7 @@ export function Cube4x4() {
           <button className="btn" onClick={() => doMoves("Rw U2 Rw2 U2 Rw U2 Rw2 U2 Rw2 U2 Rw2 U2")} disabled={busy}>OLL parity (示意)</button>
           <button className="btn" onClick={() => doMoves("r2 U2 r2 Uw2 r2 Uw2 U2")} disabled={busy}>PLL parity (示意)</button>
           <button className="btn" onClick={() => doMoves(randomScramble4x4())} disabled={busy}>随机打乱</button>
-          <button className="btn-ghost" onClick={() => { setCube(newCube(4)); setPendingMove(null); setBusy(false); queueRef.current = [] }}>↺ 重置</button>
+          <button className="btn-ghost" onClick={() => { setCube(newCube(4)); setPendingMove(null); setBusy(false); queueRef.current = []; currentMoveRef.current = null }}>↺ 重置</button>
         </div>
       </section>
 

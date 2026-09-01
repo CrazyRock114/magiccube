@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
 import { newCube, applyMoveInPlace, getStickerString, isSolved, parseMoves, invertMoves, cloneCube } from '../cube/state'
 import { CubeState } from '../cube/state'
@@ -32,48 +32,53 @@ export function Cube3x3() {
   const [pendingMove, setPendingMove] = useState<string | null>(null)
   const [moveLog, setMoveLog] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
+  // 重要：state 在动画开始时**不变** — 由 Cube3D 的 group rotation 推动 cubie 视觉转动。
+  // 只有动画结束 (onMoveApplied) 才把当前 move apply 到 state 上。
   const queueRef = useRef<string[]>([])
+  const currentMoveRef = useRef<string | null>(null)
+
+  const triggerNext = useCallback(() => {
+    if (queueRef.current.length === 0) {
+      currentMoveRef.current = null
+      setPendingMove(null)
+      setBusy(false)
+      return
+    }
+    const next = queueRef.current.shift()!
+    currentMoveRef.current = next
+    setPendingMove(next)
+  }, [])
 
   const doMove = useCallback((m: string) => {
     if (busy) return
     setBusy(true)
-    const nc = cloneCube(cube)
-    applyMoveInPlace(nc, m)
-    setCube(nc)
     setMoveLog(log => [...log, m])
-    setPendingMove(m)
-  }, [cube, busy])
+    queueRef.current = [m]
+    triggerNext()
+  }, [busy, triggerNext])
 
   const onMoveApplied = useCallback(() => {
-    setPendingMove(null)
-    if (queueRef.current.length > 0) {
-      const next = queueRef.current.shift()!
-      // apply next to current cube
+    // 动画结束：把刚播完的 move apply 到 state
+    const finishedMove = currentMoveRef.current
+    if (finishedMove) {
       setCube(c => {
         const nc = cloneCube(c)
-        applyMoveInPlace(nc, next)
+        applyMoveInPlace(nc, finishedMove)
         return nc
       })
-      setMoveLog(log => [...log, next])
-      setPendingMove(next)
-    } else {
-      setBusy(false)
     }
-  }, [])
+    triggerNext()
+  }, [triggerNext])
 
   const doMoves = useCallback((ms: string) => {
     const list = parseMoves(ms)
     if (list.length === 0) return
     if (busy) return
     setBusy(true)
-    queueRef.current = [...list]
-    const first = queueRef.current.shift()!
-    const nc = cloneCube(cube)
-    applyMoveInPlace(nc, first)
-    setCube(nc)
     setMoveLog(log => [...log, ...list])
-    setPendingMove(first)
-  }, [cube, busy])
+    queueRef.current = [...list]
+    triggerNext()
+  }, [busy, triggerNext])
 
   const reset = () => {
     setCube(newCube(3))
@@ -81,6 +86,7 @@ export function Cube3x3() {
     setPendingMove(null)
     setBusy(false)
     queueRef.current = []
+    currentMoveRef.current = null
   }
 
   const invert = () => {
