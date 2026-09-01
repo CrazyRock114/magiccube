@@ -1,87 +1,209 @@
-// 3x3x3 Rubik's cube state (cubie model).
-// State = (cp[8], co[8], ep[12], eo[12]) + 54-char sticker string for rendering.
-// 8 corners + 12 edges + 6 fixed centers. No solver.
+// NxN Rubik's cube state (cubie model).
+// 每个 cubie 有 grid position + orientation (quaternion) + stickers。
+// 支持 N=2, 3, 4。状态用 mutable-in-place 风格 (caller 做 clone)。
+
+import { IDENTITY_QUAT, multiplyQuat, quatFromAxisAngle, rotateGrid90, snapPos, rotateVec } from './quat'
+import type { Quat, Vec3 } from './quat'
 
 export type Face = 'U' | 'R' | 'F' | 'D' | 'L' | 'B'
+export type Axis = 'x' | 'y' | 'z'
 
-export interface CubeModel {
-  cp: number[]   // corner permutation: cp[i] = which corner piece is at slot i
-  co: number[]   // corner orientation: co[i] in {0, 1, 2}
-  ep: number[]   // edge permutation
-  eo: number[]   // edge orientation: eo[i] in {0, 1}
-  stickers: string  // 54-char projection for rendering
+export interface Sticker {
+  // 这个 sticker 的颜色（不动；stickers 永远属于它所在的 cubie）
+  color: Face
+  // sticker 在 cubie 局部坐标系中的法线方向
+  normal: Vec3
 }
 
-export function solvedCube(): CubeModel {
+export interface Cubie {
+  pos: Vec3            // grid 位置
+  ori: Quat            // 朝向 (quaternion)
+  stickers: Sticker[]  // 在 cubie 局部空间朝外的 sticker 们
+}
+
+export interface CubeState {
+  size: 2 | 3 | 4
+  cubies: Cubie[]
+}
+
+export const COLOR_HEX: Record<Face, string> = {
+  U: '#f5f5f5', D: '#ffd500', F: '#009b48', B: '#0046ad', L: '#ff5900', R: '#b71234',
+}
+
+export const FACE_ORDER: Face[] = ['U', 'R', 'F', 'D', 'L', 'B']
+
+// --- 构造 solved state ---
+
+function stickersForPosition(x: number, y: number, z: number, half: number): Sticker[] {
+  const stickers: Sticker[] = []
+  if (x === half) stickers.push({ color: 'R', normal: [1, 0, 0] })
+  if (x === -half) stickers.push({ color: 'L', normal: [-1, 0, 0] })
+  if (y === half) stickers.push({ color: 'U', normal: [0, 1, 0] })
+  if (y === -half) stickers.push({ color: 'D', normal: [0, -1, 0] })
+  if (z === half) stickers.push({ color: 'F', normal: [0, 0, 1] })
+  if (z === -half) stickers.push({ color: 'B', normal: [0, 0, -1] })
+  return stickers
+}
+
+export function solvedCube(size: 2 | 3 | 4): CubeState {
+  const cubies: Cubie[] = []
+  const half = (size - 1) / 2
+  for (let xi = 0; xi < size; xi++) {
+    for (let yi = 0; yi < size; yi++) {
+      for (let zi = 0; zi < size; zi++) {
+        // 内部不可见 cubie 跳过
+        if (xi > 0 && xi < size - 1 &&
+            yi > 0 && yi < size - 1 &&
+            zi > 0 && zi < size - 1) continue
+        const x = xi - half
+        const y = yi - half
+        const z = zi - half
+        cubies.push({
+          pos: [x, y, z],
+          ori: [...IDENTITY_QUAT] as Quat,
+          stickers: stickersForPosition(x, y, z, half),
+        })
+      }
+    }
+  }
+  return { size, cubies }
+}
+
+export function newCube(size: 2 | 3 | 4 = 3): CubeState {
+  return solvedCube(size)
+}
+
+export function cloneCube(c: CubeState): CubeState {
   return {
-    cp: [0, 1, 2, 3, 4, 5, 6, 7],
-    co: [0, 0, 0, 0, 0, 0, 0, 0],
-    ep: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-    eo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    stickers: 'UUUUUUUUU' + 'RRRRRRRRR' + 'FFFFFFFFF' + 'DDDDDDDDD' + 'LLLLLLLLL' + 'BBBBBBBBB',
+    size: c.size,
+    cubies: c.cubies.map(cu => ({
+      pos: [...cu.pos] as Vec3,
+      ori: [...cu.ori] as Quat,
+      stickers: cu.stickers.map(s => ({ color: s.color, normal: [...s.normal] as Vec3 })),
+    })),
   }
 }
 
-export function newCube(): CubeModel {
-  return solvedCube()
+// --- Move 应用 ---
+
+export interface MoveInfo {
+  face: Face
+  prime: boolean
+  double: boolean
+  wide: boolean  // 4x4: 转 2 层
 }
 
-export function cloneCube(c: CubeModel): CubeModel {
+export function parseMoveToken(m: string): MoveInfo {
+  if (!m) throw new Error('empty move')
+  const ch = m[0]
+  const faceUpper = ch.toUpperCase() as Face
+  if (!'URFDLB'.includes(faceUpper)) throw new Error('unknown face: ' + ch)
   return {
-    cp: c.cp.slice(), co: c.co.slice(),
-    ep: c.ep.slice(), eo: c.eo.slice(),
-    stickers: c.stickers,
+    face: faceUpper,
+    prime: m.includes("'"),
+    double: m.includes('2'),
+    wide: ch === ch.toLowerCase() || m.includes('w'),
   }
 }
 
-export function getStickerString(c: CubeModel): string {
-  return c.stickers
-}
-
-export function fromStickerString(s: string): CubeModel {
-  // Parsing an arbitrary sticker string back to (cp, co, ep, eo) is hard in general.
-  // For our app we only ever start from solved and apply moves, so a fresh solved cube
-  // is a safe fallback. (Cube3D re-derives stickers from internal state.)
-  void s
-  return solvedCube()
-}
-
-export function isSolved(c: CubeModel): boolean {
-  return c.stickers === solvedCube().stickers
-}
-
-export function applyMove(c: CubeModel, move: string): CubeModel {
-  const def = MOVE_DEFS[move[0]]
-  if (!def) throw new Error('Unknown move: ' + move)
-  const prime = move.includes("'")
-  const double = move.includes('2')
-  const next: CubeModel = { ...c, cp: new Array(8), co: new Array(8), ep: new Array(12), eo: new Array(12) }
-  applyOne(next, c, def)
-  if (double) applyOne(next, next, def)
-  if (prime) {
-    const tmp: CubeModel = { ...next, cp: new Array(8), co: new Array(8), ep: new Array(12), eo: new Array(12) }
-    applyOne(tmp, next, def)
-    next.cp = tmp.cp; next.co = tmp.co; next.ep = tmp.ep; next.eo = tmp.eo
+function getLayers(state: CubeState, info: MoveInfo): { axis: Axis; layers: number[] } {
+  const half = (state.size - 1) / 2
+  let axis: Axis
+  let outerLayer: number
+  switch (info.face) {
+    case 'R': axis = 'x'; outerLayer = half; break
+    case 'L': axis = 'x'; outerLayer = -half; break
+    case 'U': axis = 'y'; outerLayer = half; break
+    case 'D': axis = 'y'; outerLayer = -half; break
+    case 'F': axis = 'z'; outerLayer = half; break
+    case 'B': axis = 'z'; outerLayer = -half; break
   }
-  next.stickers = buildStickerString(next.cp, next.co, next.ep, next.eo)
-  return next
+  if (info.wide && state.size === 4) {
+    const inner = outerLayer > 0 ? outerLayer - 1 : outerLayer + 1
+    return { axis, layers: [outerLayer, inner] }
+  }
+  return { axis, layers: [outerLayer] }
 }
 
-function applyOne(out: CubeModel, src: CubeModel, def: MoveDef): void {
-  for (let i = 0; i < 8; i++) {
-    out.cp[i] = src.cp[def.cp[i]]
-    out.co[i] = (src.co[def.cp[i]] + def.co[i]) % 3
+function axisIndex(axis: Axis): 0 | 1 | 2 {
+  return axis === 'x' ? 0 : axis === 'y' ? 1 : 2
+}
+
+function applyTurn(c: Cubie, axis: Axis, totalTurns: 1 | 2 | 3, angleQuat: Quat): void {
+  c.pos = snapPos(rotateGrid90(c.pos, axis, totalTurns))
+  c.ori = multiplyQuat(angleQuat, c.ori) as Quat
+}
+
+function computeTurn(move: string): { totalTurns: 1 | 2 | 3; angleQuat: Quat } {
+  const info = parseMoveToken(move)
+  const turns = info.double ? 2 : (info.prime ? 3 : 1)
+  let axis: Axis
+  switch (info.face) {
+    case 'R': case 'L': axis = 'x'; break
+    case 'U': case 'D': axis = 'y'; break
+    case 'F': case 'B': axis = 'z'; break
   }
-  for (let i = 0; i < 12; i++) {
-    out.ep[i] = src.ep[def.ep[i]]
-    out.eo[i] = (src.eo[def.ep[i]] + def.eo[i]) % 2
+  // 对于 R/U/F（normal 在 +axis 方向），CW = 1 quarter
+  // 对于 L/D/B（normal 在 -axis 方向），CW = -1 quarter
+  // 我们用 rotateGrid90 的"绕 +axis 顺时针"作为基本动作。
+  // R: 1 quarter CW around +X
+  // L: 1 quarter CW around +X axis 但 L 面是 -X，所以 L = 3 quarter CW around +X = -1 quarter
+  // 同理 D/B。
+  const negate = info.face === 'L' || info.face === 'D' || info.face === 'B'
+  const totalTurns = (negate ? (4 - turns) : turns) as 1 | 2 | 3
+  const angle = -Math.PI / 2 * totalTurns
+  return { totalTurns, angleQuat: quatFromAxisAngle(axis, angle) }
+}
+
+export function applyMove(state: CubeState, move: string): CubeState {
+  const info = parseMoveToken(move)
+  const { axis, layers } = getLayers(state, info)
+  const { totalTurns, angleQuat } = computeTurn(move)
+  const axisIdx = axisIndex(axis)
+
+  const newCubies: Cubie[] = []
+  for (const cu of state.cubies) {
+    if (layers.includes(cu.pos[axisIdx])) {
+      const newCu: Cubie = {
+        pos: [...cu.pos] as Vec3,
+        ori: [...cu.ori] as Quat,
+        stickers: cu.stickers,
+      }
+      applyTurn(newCu, axis, totalTurns, angleQuat)
+      newCubies.push(newCu)
+    } else {
+      newCubies.push(cu)
+    }
+  }
+  return { size: state.size, cubies: newCubies }
+}
+
+export function applyMoveInPlace(state: CubeState, move: string): void {
+  const info = parseMoveToken(move)
+  const { axis, layers } = getLayers(state, info)
+  const { totalTurns, angleQuat } = computeTurn(move)
+  const axisIdx = axisIndex(axis)
+  for (const cu of state.cubies) {
+    if (layers.includes(cu.pos[axisIdx])) {
+      applyTurn(cu, axis, totalTurns, angleQuat)
+    }
   }
 }
 
-export function applyMoves(c: CubeModel, moves: string): CubeModel {
-  let cur = c
+export function applyMoves(state: CubeState, moves: string): CubeState {
+  let cur = state
   for (const m of parseMoves(moves)) cur = applyMove(cur, m)
   return cur
+}
+
+export function applyMovesInPlace(state: CubeState, moves: string): void {
+  for (const m of parseMoves(moves)) applyMoveInPlace(state, m)
+}
+
+// --- 查询 ---
+
+export function parseMoves(notation: string): string[] {
+  return notation.trim().split(/\s+/).filter(Boolean)
 }
 
 export function invertMoveToken(m: string): string {
@@ -94,133 +216,70 @@ export function invertMoves(notation: string): string {
   return parseMoves(notation).reverse().map(invertMoveToken).join(' ')
 }
 
-export function parseMoves(notation: string): string[] {
-  return notation.trim().split(/\s+/).filter(Boolean)
+export function isSolved(state: CubeState): boolean {
+  const solved = solvedCube(state.size)
+  // 按位置查：每个 solved 位置上的当前 cubie 必须是 identity ori (q or -q)
+  const currentByPos = new Map<string, Cubie>()
+  for (const c of state.cubies) {
+    currentByPos.set(`${c.pos[0]},${c.pos[1]},${c.pos[2]}`, c)
+  }
+  for (const sCu of solved.cubies) {
+    const cCu = currentByPos.get(`${sCu.pos[0]},${sCu.pos[1]},${sCu.pos[2]}`)
+    if (!cCu) return false
+    // 四元数 double-cover：q 和 -q 表示同一旋转。identity 可以是 (0,0,0,1) 或 (0,0,0,-1)
+    if (Math.abs(cCu.ori[0]) > 0.0001 || Math.abs(cCu.ori[1]) > 0.0001 || Math.abs(cCu.ori[2]) > 0.0001) return false
+    if (Math.abs(Math.abs(cCu.ori[3]) - 1) > 0.0001) return false
+  }
+  return true
 }
 
-export const FACE_ORDER: Face[] = ['U', 'R', 'F', 'D', 'L', 'B']
+// --- Sticker string 投影（用于 MiniCube2D） ---
 
-export function faceOf(c: CubeModel | string, face: Face): string {
-  const s = typeof c === 'string' ? c : c.stickers
+interface FaceGrid {
+  face: Face
+  normalAxis: Axis
+  normalSign: 1 | -1
+  position: (x: number, y: number, z: number, half: number) => [number, number]
+}
+
+const FACE_GRIDS: Record<Face, FaceGrid> = {
+  U: { face: 'U', normalAxis: 'y', normalSign:  1, position: (x, _y, z, h) => [x + h, h - z] },
+  D: { face: 'D', normalAxis: 'y', normalSign: -1, position: (x, _y, z, h) => [x + h, z + h] },
+  R: { face: 'R', normalAxis: 'x', normalSign:  1, position: (_x, y, z, h) => [h - z, h - y] },
+  L: { face: 'L', normalAxis: 'x', normalSign: -1, position: (_x, y, z, h) => [z + h, h - y] },
+  F: { face: 'F', normalAxis: 'z', normalSign:  1, position: (x, y, _z, h) => [x + h, h - y] },
+  B: { face: 'B', normalAxis: 'z', normalSign: -1, position: (x, y, _z, h) => [h - x, h - y] },
+}
+
+export function getStickerString(state: CubeState): string {
+  const half = (state.size - 1) / 2
+  const size = state.size
+  const result: string[] = []
+  for (const fg of FACE_ORDER.map(f => FACE_GRIDS[f])) {
+    const grid: string[] = new Array(size * size).fill('?')
+    const axIdx = axisIndex(fg.normalAxis)
+    for (const cu of state.cubies) {
+      // cubie 必须真的在该 face 的平面上（否则 sticker 朝外是朝魔方内部）
+      if (Math.abs(cu.pos[axIdx] - fg.normalSign * half) >= 0.1) continue
+      for (const st of cu.stickers) {
+        const worldNormal = rotateVec(cu.ori, st.normal)
+        if (Math.abs(worldNormal[axIdx] - fg.normalSign) >= 0.1) continue
+        const [col, row] = fg.position(cu.pos[0], cu.pos[1], cu.pos[2], half)
+        const colI = Math.round(col)
+        const rowI = Math.round(row)
+        if (colI < 0 || colI >= size || rowI < 0 || rowI >= size) continue
+        grid[rowI * size + colI] = st.color
+      }
+    }
+    result.push(grid.join(''))
+  }
+  return result.join('')
+}
+
+// Legacy compat: 老的 code 还在用 faceOf(s, face)
+export function faceOf(s: string, face: Face): string {
   const i = FACE_ORDER.indexOf(face)
-  return s.slice(i * 9, i * 9 + 9)
-}
-
-export const COLOR_HEX: Record<Face, string> = {
-  U: '#f5f5f5', D: '#ffd500', F: '#009b48', B: '#0046ad', L: '#ff5900', R: '#b71234',
-}
-
-export function stickerColor(s: string, face: Face, pos: number): Face {
-  return s[FACE_ORDER.indexOf(face) * 9 + pos] as Face
-}
-
-// --- Move tables (Kociemba / cubejs standard) ---
-
-interface MoveDef { cp: number[]; co: number[]; ep: number[]; eo: number[] }
-
-const U: MoveDef = {
-  cp: [3, 0, 1, 2, 4, 5, 6, 7], co: [0,0,0,0,0,0,0,0],
-  ep: [3, 0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11], eo: [0,0,0,0,0,0,0,0,0,0,0,0],
-}
-const R: MoveDef = {
-  cp: [4, 0, 2, 3, 5, 1, 6, 7], co: [2,1,0,0,1,2,0,0],
-  ep: [8, 1, 2, 3, 11, 5, 6, 7, 4, 9, 10, 0], eo: [0,0,0,0,0,0,0,0,0,0,0,0],
-}
-const F: MoveDef = {
-  cp: [1, 2, 3, 0, 4, 5, 6, 7], co: [1,2,0,1,0,0,0,0],
-  ep: [0, 9, 2, 3, 4, 1, 6, 7, 8, 5, 10, 11], eo: [0,1,0,0,0,1,0,0,0,1,0,0],
-}
-const D: MoveDef = {
-  cp: [0, 1, 2, 3, 5, 6, 7, 4], co: [0,0,0,0,0,0,0,0],
-  ep: [0, 1, 2, 3, 5, 6, 7, 4, 8, 9, 10, 11], eo: [0,0,0,0,0,0,0,0,0,0,0,0],
-}
-const L: MoveDef = {
-  cp: [0, 1, 6, 2, 4, 5, 7, 3], co: [0,0,1,2,0,0,2,1],
-  ep: [0, 1, 10, 3, 4, 5, 9, 7, 8, 2, 6, 11], eo: [0,0,0,0,0,0,0,0,0,0,0,0],
-}
-const B: MoveDef = {
-  cp: [0, 5, 1, 3, 4, 6, 2, 7], co: [0,1,2,0,0,2,1,0],
-  ep: [0, 1, 2, 7, 4, 5, 6, 10, 8, 9, 3, 11], eo: [0,0,0,1,0,0,0,1,0,0,1,0],
-}
-
-const MOVE_DEFS: Record<string, MoveDef> = { U, R, F, D, L, B }
-
-// --- Sticker string builder ---
-// Facelet definitions (Kociemba/cubejs convention).
-// _U(x) = x-1, _R(x) = 9 + (x-1), _F(x) = 18 + (x-1), _D(x) = 27 + (x-1), _L(x) = 36 + (x-1), _B(x) = 45 + (x-1).
-// Each corner slot lists 3 face positions in the order [U-or-D, F-or-B, R-or-L] depending on the slot.
-// Each edge slot lists 2 face positions [U-or-D, F-or-B-or-R-or-L] depending on the slot.
-
-const CORNER_FACELETS: number[][] = [
-  [8, 9, 20],    // URF
-  [6, 18, 38],   // UFL
-  [0, 36, 45],   // ULB
-  [2, 45, 11],   // UBR
-  [27, 20, 15],  // DFR
-  [24, 38, 27],  // DFL — wait, position 24 is L[6]=DLF L-sticker, position 38 is L[2]=UFL L-sticker. Let me recompute.
-  [26, 47, 53],  // DBL: D[8]=DBR D-sticker(26), B[2]=UBL B-sticker(47), B[8]=DBL B-sticker(53). Hmm.
-  [29, 53, 17],  // DRB: D[2]=DFR D(29), R[8]=DBR R(53), B[8]=DBL B(53). conflict.
-]
-
-// I'll just use the well-tested cubejs facelet definitions.
-const CF: number[][] = [
-  [8, 9, 20],
-  [6, 18, 38],
-  [0, 36, 45],
-  [2, 45, 11],
-  [29, 20, 15],
-  [27, 38, 24],
-  [26, 53, 47],
-  [35, 17, 51],
-]
-
-const EF: number[][] = [
-  [5, 10],
-  [7, 19],
-  [3, 37],
-  [1, 46],
-  [32, 12],
-  [28, 21],
-  [34, 39],
-  [35, 48],
-  [23, 14],
-  [25, 41],
-  [50, 43],
-  [49, 16],
-]
-
-// Colors of each corner/edge piece in solved state.
-const CORNER_COLORS: Face[][] = [
-  ['U', 'R', 'F'], ['U', 'F', 'L'], ['U', 'L', 'B'], ['U', 'B', 'R'],
-  ['D', 'F', 'R'], ['D', 'L', 'F'], ['D', 'B', 'L'], ['D', 'R', 'B'],
-]
-const EDGE_COLORS: Face[][] = [
-  ['U', 'R'], ['U', 'F'], ['U', 'L'], ['U', 'B'],
-  ['D', 'R'], ['D', 'F'], ['D', 'L'], ['D', 'B'],
-  ['F', 'R'], ['F', 'L'], ['B', 'L'], ['B', 'R'],
-]
-
-function buildStickerString(cp: number[], co: number[], ep: number[], eo: number[]): string {
-  const f: string[] = new Array(54).fill('?')
-  for (let slot = 0; slot < 8; slot++) {
-    const facelets = CF[slot]
-    const piece = cp[slot]
-    const tw = co[slot]
-    const colors = CORNER_COLORS[piece]
-    for (let i = 0; i < 3; i++) {
-      f[facelets[(i + tw) % 3]] = colors[i]
-    }
-  }
-  for (let slot = 0; slot < 12; slot++) {
-    const facelets = EF[slot]
-    const piece = ep[slot]
-    const fl = eo[slot]
-    const colors = EDGE_COLORS[piece]
-    for (let i = 0; i < 2; i++) {
-      f[facelets[(i + fl) % 2]] = colors[i]
-    }
-  }
-  // 6 fixed centers
-  f[4] = 'U'; f[13] = 'R'; f[22] = 'F'; f[31] = 'D'; f[40] = 'L'; f[49] = 'B'
-  return f.join('')
+  const totalChars = s.length
+  const size = Math.sqrt(totalChars / 6)
+  return s.slice(i * size * size, (i + 1) * size * size)
 }

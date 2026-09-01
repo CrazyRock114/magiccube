@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
-import { CubeModel, newCube, applyMove, applyMoves, getStickerString, fromStickerString, parseMoves, isSolved } from '../cube/state'
+import { newCube, applyMoveInPlace, parseMoves, isSolved, cloneCube } from '../cube/state'
+import { CubeState } from '../cube/state'
 import { ALGORITHMS_2X2 } from '../cube/algorithms'
 
 const FACE_MOVES_2X2 = ['R', "R'", 'U', "U'", 'F', "F'", 'L', "L'", 'D', "D'", 'B', "B'"]
@@ -21,50 +22,46 @@ function randomScramble2x2(): string {
 }
 
 export function Cube2x2() {
-  const [cube, setCube] = useState<CubeModel>(newCube())
+  const [cube, setCube] = useState<CubeState>(() => newCube(2))
   const [pendingMove, setPendingMove] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const queueRef = useRef<string[]>([])
-
-  const stickerString = getStickerString(cube)
 
   const onMoveApplied = useCallback(() => {
     setPendingMove(null)
     if (queueRef.current.length > 0) {
       const next = queueRef.current.shift()!
       setCube(c => {
-        const nc = fromStickerString(getStickerString(c))
-        applyMove(nc, next)
+        const nc = cloneCube(c)
+        applyMoveInPlace(nc, next)
         return nc
       })
       setPendingMove(next)
+    } else {
+      setBusy(false)
     }
   }, [])
 
-  const doMoves = (ms: string) => {
+  const doMoves = useCallback((ms: string) => {
     const list = parseMoves(ms)
     if (list.length === 0 || busy) return
     setBusy(true)
     queueRef.current = [...list]
     const first = queueRef.current.shift()!
-    setCube(c => {
-      const nc = fromStickerString(getStickerString(c))
-      applyMove(nc, first)
-      return nc
-    })
+    const nc = cloneCube(cube)
+    applyMoveInPlace(nc, first)
+    setCube(nc)
     setPendingMove(first)
-  }
+  }, [cube, busy])
 
-  const doMove = (m: string) => {
+  const doMove = useCallback((m: string) => {
     if (busy) return
     setBusy(true)
-    setCube(c => {
-      const nc = fromStickerString(getStickerString(c))
-      applyMove(nc, m)
-      return nc
-    })
+    const nc = cloneCube(cube)
+    applyMoveInPlace(nc, m)
+    setCube(nc)
     setPendingMove(m)
-  }
+  }, [cube, busy])
 
   return (
     <div className="space-y-6">
@@ -75,11 +72,11 @@ export function Cube2x2() {
       </header>
 
       <div className="grid lg:grid-cols-2 gap-6">
-        <Cube3D stickerString={stickerString} pendingMove={pendingMove} onMoveApplied={onMoveApplied} height={420} />
+        <Cube3D state={cube} pendingMove={pendingMove} onMoveApplied={onMoveApplied} height={420} />
         <div className="space-y-4">
           <div className="card">
             <div className="text-xs text-cube-muted uppercase tracking-widest mb-2 font-mono">状态</div>
-            <MiniCube2D stickerString={stickerString} />
+            <MiniCube2D state={cube} />
             <div className="mt-3 text-sm font-mono text-cube-muted">{isSolved(cube) ? '已复原 ✓' : '未复原'}</div>
           </div>
           <div className="card">
@@ -96,9 +93,9 @@ export function Cube2x2() {
       <section className="card">
         <div className="text-xs text-cube-muted uppercase tracking-widest mb-2 font-mono">预设</div>
         <div className="flex flex-wrap gap-2">
-          <button className="btn" onClick={() => doMoves("R U R' U' R' F R2 U' R' U' R U R' F'")} disabled={busy}>T-perm</button>
+          <button className="btn" onClick={() => doMoves("R U R' U R U2 R'")} disabled={busy}>Sune</button>
           <button className="btn" onClick={() => doMoves(randomScramble2x2())} disabled={busy}>随机打乱</button>
-          <button className="btn-ghost" onClick={() => { setCube(newCube()); setPendingMove(null); setBusy(false); queueRef.current = [] }}>↺ 重置</button>
+          <button className="btn-ghost" onClick={() => { setCube(newCube(2)); setPendingMove(null); setBusy(false); queueRef.current = [] }}>↺ 重置</button>
         </div>
       </section>
 

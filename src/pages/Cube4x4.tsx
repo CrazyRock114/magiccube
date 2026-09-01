@@ -1,9 +1,11 @@
 import { useState, useCallback, useRef } from 'react'
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
-import { newCube, applyMove, getStickerString, fromStickerString, parseMoves, isSolved } from '../cube/state'
+import { newCube, applyMoveInPlace, getStickerString, parseMoves, isSolved, cloneCube } from '../cube/state'
+import { CubeState } from '../cube/state'
 import { ALGORITHMS_4X4 } from '../cube/algorithms'
 
 const FACE_MOVES_4X4 = ['R', "R'", 'L', "L'", 'U', "U'", 'D', "D'", 'F', "F'", 'B', "B'"]
+const WIDE_MOVES_4X4 = ['Rw', "Rw'", 'Lw', "Lw'", 'Uw', "Uw'", 'Dw', "Dw'", 'Fw', "Fw'", 'Bw', "Bw'"]
 
 function randomScramble4x4(): string {
   const faces = ['U', 'R', 'F', 'D', 'L', 'B']
@@ -23,50 +25,46 @@ function randomScramble4x4(): string {
 }
 
 export function Cube4x4() {
-  const [cube, setCube] = useState(newCube())
+  const [cube, setCube] = useState<CubeState>(() => newCube(4))
   const [pendingMove, setPendingMove] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const queueRef = useRef<string[]>([])
-
-  const stickerString = getStickerString(cube)
 
   const onMoveApplied = useCallback(() => {
     setPendingMove(null)
     if (queueRef.current.length > 0) {
       const next = queueRef.current.shift()!
       setCube(c => {
-        const nc = fromStickerString(getStickerString(c))
-        applyMove(nc, next)
+        const nc = cloneCube(c)
+        applyMoveInPlace(nc, next)
         return nc
       })
       setPendingMove(next)
+    } else {
+      setBusy(false)
     }
   }, [])
 
-  const doMoves = (ms: string) => {
+  const doMoves = useCallback((ms: string) => {
     const list = parseMoves(ms)
     if (list.length === 0 || busy) return
     setBusy(true)
     queueRef.current = [...list]
     const first = queueRef.current.shift()!
-    setCube(c => {
-      const nc = fromStickerString(getStickerString(c))
-      applyMove(nc, first)
-      return nc
-    })
+    const nc = cloneCube(cube)
+    applyMoveInPlace(nc, first)
+    setCube(nc)
     setPendingMove(first)
-  }
+  }, [cube, busy])
 
-  const doMove = (m: string) => {
+  const doMove = useCallback((m: string) => {
     if (busy) return
     setBusy(true)
-    setCube(c => {
-      const nc = fromStickerString(getStickerString(c))
-      applyMove(nc, m)
-      return nc
-    })
+    const nc = cloneCube(cube)
+    applyMoveInPlace(nc, m)
+    setCube(nc)
     setPendingMove(m)
-  }
+  }, [cube, busy])
 
   return (
     <div className="space-y-6">
@@ -77,24 +75,30 @@ export function Cube4x4() {
       </header>
 
       <div className="grid lg:grid-cols-2 gap-6">
-        <Cube3D stickerString={stickerString} pendingMove={pendingMove} onMoveApplied={onMoveApplied} height={420} />
+        <Cube3D state={cube} pendingMove={pendingMove} onMoveApplied={onMoveApplied} height={460} />
         <div className="space-y-4">
           <div className="card">
-            <div className="text-xs text-cube-muted uppercase tracking-widest mb-2 font-mono">状态（注意：3D 渲染只显示外层 sticker；4×4 内层结构在异形页会单独可视化）</div>
-            <MiniCube2D stickerString={stickerString} />
+            <div className="text-xs text-cube-muted uppercase tracking-widest mb-2 font-mono">状态（56 个可视 cubie）</div>
+            <MiniCube2D state={cube} />
             <div className="mt-3 text-sm font-mono text-cube-muted">
               步数: 0 · {isSolved(cube) ? '已复原 ✓' : '未复原'}
             </div>
           </div>
           <div className="card">
-            <div className="text-xs text-cube-muted uppercase tracking-widest mb-2 font-mono">单步</div>
+            <div className="text-xs text-cube-muted uppercase tracking-widest mb-2 font-mono">单层 (R, U, F, L, D, B)</div>
             <div className="grid grid-cols-4 gap-2">
               {FACE_MOVES_4X4.map(m => (
                 <button key={m} className="btn font-mono" onClick={() => doMove(m)} disabled={busy}>{m}</button>
               ))}
             </div>
+            <div className="text-xs text-cube-muted mt-3 mb-1 font-mono">双层 wide (Rw, Uw, Fw, ...)</div>
+            <div className="grid grid-cols-4 gap-2">
+              {WIDE_MOVES_4X4.map(m => (
+                <button key={m} className="btn font-mono" onClick={() => doMove(m)} disabled={busy}>{m}</button>
+              ))}
+            </div>
             <div className="text-xs text-cube-muted mt-2">
-              <b>w</b> 表示 wide（双层）。Rw = 同时转 R 和 r（内右层）。
+              <b>w</b> = wide（双层）。Rw = 同时转 R 和 r（内右层）。
             </div>
           </div>
         </div>
@@ -106,7 +110,7 @@ export function Cube4x4() {
           <button className="btn" onClick={() => doMoves("Rw U2 Rw2 U2 Rw U2 Rw2 U2 Rw2 U2 Rw2 U2")} disabled={busy}>OLL parity (示意)</button>
           <button className="btn" onClick={() => doMoves("r2 U2 r2 Uw2 r2 Uw2 U2")} disabled={busy}>PLL parity (示意)</button>
           <button className="btn" onClick={() => doMoves(randomScramble4x4())} disabled={busy}>随机打乱</button>
-          <button className="btn-ghost" onClick={() => { setCube(newCube()); setPendingMove(null); setBusy(false); queueRef.current = [] }}>↺ 重置</button>
+          <button className="btn-ghost" onClick={() => { setCube(newCube(4)); setPendingMove(null); setBusy(false); queueRef.current = [] }}>↺ 重置</button>
         </div>
       </section>
 
@@ -156,7 +160,7 @@ export function Cube4x4() {
           ))}
         </div>
         <div className="text-xs text-cube-muted mt-3">
-          注：4×4 公式涉及 wide moves (Rw, Uw 等) 在 cubejs 中需要特殊处理。这里是简化版。
+          注：4×4 公式涉及 wide moves (Rw, Uw 等)。
         </div>
       </section>
     </div>

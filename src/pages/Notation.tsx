@@ -1,5 +1,6 @@
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
-import { newCube, applyMove, getStickerString, fromStickerString, applyMoves } from '../cube/state'
+import { newCube, applyMoveInPlace, getStickerString, cloneCube } from '../cube/state'
+import { CubeState } from '../cube/state'
 import { useState } from 'react'
 
 const FACES = [
@@ -12,13 +13,17 @@ const FACES = [
 ]
 
 export function Notation() {
-  const [demo, setDemo] = useState({ s: getStickerString(newCube()), move: '' as string | null })
+  const [demo, setDemo] = useState<CubeState>(() => newCube(3))
+  const [pendingMove, setPendingMove] = useState<string | null>(null)
 
   const showMove = (m: string) => {
-    const c = newCube()
-    applyMove(c, m)
-    setDemo({ s: getStickerString(c), move: m })
+    const c = newCube(3)
+    applyMoveInPlace(c, m)
+    setDemo(c)
+    setPendingMove(m)
   }
+
+  const onMoveApplied = () => setPendingMove(null)
 
   return (
     <div className="space-y-8">
@@ -93,7 +98,7 @@ export function Notation() {
         <p className="text-sm text-cube-muted mb-4">点下面按钮看具体转动的效果（高亮 9 个受影响 sticker）。</p>
         <div className="grid lg:grid-cols-2 gap-6">
           <div>
-            <Cube3D stickerString={demo.s} pendingMove={demo.move} height={360} />
+            <Cube3D state={demo} pendingMove={pendingMove} onMoveApplied={onMoveApplied} height={360} />
           </div>
           <div>
             <div className="grid grid-cols-3 gap-2">
@@ -129,10 +134,10 @@ export function Notation() {
               ))}
             </div>
             <div className="mt-4">
-              <MiniCube2D stickerString={demo.s} />
+              <MiniCube2D state={demo} />
             </div>
             <div className="mt-3 text-xs text-cube-muted font-mono">
-              当前执行: {demo.move || '（无）'}
+              当前执行: {pendingMove || '（无）'}
             </div>
           </div>
         </div>

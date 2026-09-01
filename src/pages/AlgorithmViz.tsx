@@ -1,6 +1,7 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
-import { CubeModel, newCube, applyMove, applyMoves, getStickerString, fromStickerString, parseMoves, invertMoves, isSolved } from '../cube/state'
+import { newCube, applyMoveInPlace, getStickerString, isSolved, parseMoves, cloneCube } from '../cube/state'
+import { CubeState } from '../cube/state'
 import { ALGORITHMS } from '../cube/algorithms'
 
 const SECTIONS: { id: string; title: string; algorithms: typeof ALGORITHMS }[] = [
@@ -9,20 +10,20 @@ const SECTIONS: { id: string; title: string; algorithms: typeof ALGORITHMS }[] =
   { id: 'pll', title: 'PLL（顶层定位）', algorithms: ALGORITHMS.filter(a => a.category === 'PLL') },
 ]
 
-function findOrder(moves: string): number {
-  const c = newCube()
-  const list = parseMoves(moves)
+function findOrder(notation: string): number {
+  const c = newCube(3)
+  const list = parseMoves(notation)
   for (let i = 1; i <= 200; i++) {
-    for (const m of list) applyMove(c, m)
+    for (const m of list) applyMoveInPlace(c, m)
     if (isSolved(c)) return i
   }
   return -1
 }
 
-function MoveStepper({ algorithm, expanded }: { algorithm: typeof ALGORITHMS[0]; expanded: boolean }) {
-  const [cube, setCube] = useState<CubeModel>(() => {
-    const c = newCube()
-    applyMoves(c, algorithm.notation)
+function MoveStepper({ algorithm }: { algorithm: typeof ALGORITHMS[0] }) {
+  const [cube, setCube] = useState<CubeState>(() => {
+    const c = newCube(3)
+    applyMoveInPlace(c, algorithm.notation.replace(/\s+/g, ' '))
     return c
   })
   const [stepIdx, setStepIdx] = useState(0)
@@ -32,9 +33,9 @@ function MoveStepper({ algorithm, expanded }: { algorithm: typeof ALGORITHMS[0];
   const moves = parseMoves(algorithm.notation)
 
   const stepCube = useCallback((idx: number) => {
-    const c = newCube()
+    const c = newCube(3)
     for (let i = 0; i < idx; i++) {
-      applyMove(c, moves[i])
+      applyMoveInPlace(c, moves[i])
     }
     return c
   }, [moves])
@@ -55,7 +56,7 @@ function MoveStepper({ algorithm, expanded }: { algorithm: typeof ALGORITHMS[0];
   const playAll = () => {
     if (busy) return
     setBusy(true)
-    setCube(newCube())
+    setCube(newCube(3))
     setStepIdx(0)
     queueRef.current = [...moves]
     const first = queueRef.current.shift()!
@@ -81,7 +82,7 @@ function MoveStepper({ algorithm, expanded }: { algorithm: typeof ALGORITHMS[0];
   }
 
   const reset = () => {
-    setCube(newCube())
+    setCube(newCube(3))
     setStepIdx(0)
     setPendingMove(null)
     setBusy(false)
@@ -106,14 +107,14 @@ function MoveStepper({ algorithm, expanded }: { algorithm: typeof ALGORITHMS[0];
 
       <div className="grid md:grid-cols-2 gap-4">
         <Cube3D
-          stickerString={getStickerString(cube)}
+          state={cube}
           pendingMove={pendingMove}
           onMoveApplied={onAnimationDone}
           height={280}
           showControls={false}
         />
         <div className="space-y-2">
-          <MiniCube2D stickerString={getStickerString(cube)} />
+          <MiniCube2D state={cube} />
           <div className="text-xs text-cube-muted font-mono">
             步 {stepIdx} / {moves.length} · {isSolved(cube) ? '已复原' : '打乱中'}
           </div>
@@ -165,7 +166,7 @@ export function AlgorithmViz() {
         <section key={section.id} className="space-y-4">
           <h2 className="h3">{section.title}</h2>
           {section.algorithms.map(algo => (
-            <MoveStepper key={algo.name} algorithm={algo} expanded={false} />
+            <MoveStepper key={algo.name} algorithm={algo} />
           ))}
         </section>
       ))}

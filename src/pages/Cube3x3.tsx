@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
-import { CubeModel, newCube, applyMove, applyMoves, getStickerString, isSolved, fromStickerString, parseMoves, invertMoves } from '../cube/state'
+import { newCube, applyMoveInPlace, getStickerString, isSolved, parseMoves, invertMoves, cloneCube } from '../cube/state'
+import { CubeState } from '../cube/state'
 
 const FACE_MOVES = ['U', "U'", 'D', "D'", 'R', "R'", 'L', "L'", 'F', "F'", 'B', "B'"]
 const SCRAMBLE_PRESETS = [
@@ -27,43 +28,38 @@ function randomScramble(): string {
 }
 
 export function Cube3x3() {
-  const [cube, setCube] = useState<CubeModel>(newCube())
+  const [cube, setCube] = useState<CubeState>(() => newCube(3))
   const [pendingMove, setPendingMove] = useState<string | null>(null)
   const [moveLog, setMoveLog] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const queueRef = useRef<string[]>([])
 
-  const stickerString = getStickerString(cube)
-
-  const playMove = useCallback((m: string) => {
+  const doMove = useCallback((m: string) => {
+    if (busy) return
+    setBusy(true)
+    const nc = cloneCube(cube)
+    applyMoveInPlace(nc, m)
+    setCube(nc)
+    setMoveLog(log => [...log, m])
     setPendingMove(m)
-  }, [])
+  }, [cube, busy])
 
-  const handleMoveApplied = useCallback(() => {
+  const onMoveApplied = useCallback(() => {
     setPendingMove(null)
     if (queueRef.current.length > 0) {
       const next = queueRef.current.shift()!
+      // apply next to current cube
       setCube(c => {
-        const nc = fromStickerString(getStickerString(c))
-        applyMove(nc, next)
+        const nc = cloneCube(c)
+        applyMoveInPlace(nc, next)
         return nc
       })
       setMoveLog(log => [...log, next])
       setPendingMove(next)
+    } else {
+      setBusy(false)
     }
   }, [])
-
-  const doMove = useCallback((m: string) => {
-    if (busy) return
-    setBusy(true)
-    setCube(c => {
-      const nc = fromStickerString(getStickerString(c))
-      applyMove(nc, m)
-      return nc
-    })
-    setMoveLog(log => [...log, m])
-    setPendingMove(m)
-  }, [busy])
 
   const doMoves = useCallback((ms: string) => {
     const list = parseMoves(ms)
@@ -72,17 +68,15 @@ export function Cube3x3() {
     setBusy(true)
     queueRef.current = [...list]
     const first = queueRef.current.shift()!
-    setCube(c => {
-      const nc = fromStickerString(getStickerString(c))
-      applyMove(nc, first)
-      return nc
-    })
+    const nc = cloneCube(cube)
+    applyMoveInPlace(nc, first)
+    setCube(nc)
     setMoveLog(log => [...log, ...list])
     setPendingMove(first)
-  }, [busy])
+  }, [cube, busy])
 
   const reset = () => {
-    setCube(newCube())
+    setCube(newCube(3))
     setMoveLog([])
     setPendingMove(null)
     setBusy(false)
@@ -106,16 +100,16 @@ export function Cube3x3() {
       <div className="grid lg:grid-cols-2 gap-6">
         <div>
           <Cube3D
-            stickerString={stickerString}
+            state={cube}
             pendingMove={pendingMove}
-            onMoveApplied={handleMoveApplied}
+            onMoveApplied={onMoveApplied}
             height={460}
           />
         </div>
         <div className="space-y-4">
           <div className="card">
             <div className="text-xs text-cube-muted uppercase tracking-widest mb-2 font-mono">当前状态</div>
-            <MiniCube2D stickerString={stickerString} />
+            <MiniCube2D state={cube} />
             <div className="mt-3 text-sm font-mono text-cube-muted">
               步数: <span className="text-cube-text">{moveLog.length}</span> · {isSolved(cube) ? '已复原 ✓' : '未复原'}
             </div>
