@@ -38,10 +38,9 @@ function StickerMesh({ sticker, cubieSize }: { sticker: Sticker; cubieSize: numb
   )
 }
 
-function CubieMesh({ cubie, cubieSize, keyPrefix }: { cubie: Cubie; cubieSize: number; keyPrefix: string }) {
+function CubieMesh({ cubie, cubieSize }: { cubie: Cubie; cubieSize: number }) {
   return (
     <group
-      key={keyPrefix}
       position={cubie.pos as unknown as [number, number, number]}
       quaternion={cubie.ori as unknown as [number, number, number, number]}
     >
@@ -141,13 +140,21 @@ function CubeScene({ state, animation, onAnimationComplete, scale = 1, enableCon
     }
   }, [animation])
 
+  // 用 (cubie, originalIndex) 包一层。key 用原始 index（state.cubies 数组下标，applyMove 保留顺序）
+  // —— 让同一个 cubie 跨 state 变化保持同一 React element，避免 mesh/material 被卸载重建。
   const { staticCubies, rotatingCubies } = useMemo(() => {
-    if (!animation) return { staticCubies: state.cubies, rotatingCubies: [] as Cubie[] }
-    const s: Cubie[] = []
-    const r: Cubie[] = []
-    for (const c of state.cubies) {
-      if (isInLayers(c.pos, animation.axis, animation.layers)) r.push(c)
-      else s.push(c)
+    if (!animation) {
+      return {
+        staticCubies: state.cubies.map((c, i) => ({ c, i })),
+        rotatingCubies: [] as { c: Cubie; i: number }[],
+      }
+    }
+    const s: { c: Cubie; i: number }[] = []
+    const r: { c: Cubie; i: number }[] = []
+    for (let i = 0; i < state.cubies.length; i++) {
+      const c = state.cubies[i]
+      if (isInLayers(c.pos, animation.axis, animation.layers)) r.push({ c, i })
+      else s.push({ c, i })
     }
     return { staticCubies: s, rotatingCubies: r }
   }, [state.cubies, animation])
@@ -167,20 +174,25 @@ function CubeScene({ state, animation, onAnimationComplete, scale = 1, enableCon
     if (t >= 1 && !completedRef.current) {
       completedRef.current = true
       animRef.current = null
-      groupRef.current.rotation.set(0, 0, 0)
+      // 关键修复：动画完成时**不要**把 group rotation 重置为 0。
+      // 此时 React 还没收到 state 更新（onMoveApplied 是异步 schedule 的），
+      // 如果这里把 group 拉到 0，R3F 会用"group 在 0 + 内部 cubie 在 OLD 位置"渲染一帧，
+      // 视觉上整层 cubie 突然从最终位置跳回原位置；state 更新后又跳回最终位置 → 闪烁。
+      // 让 group 停在最终角度，R3F 下一帧之前 React 会卸载这个 group（因为 animation=null
+      // 时 rotatingCubies 为空），cubie 改用 NEW 位置以 static 渲染，视觉无缝衔接。
       onAnimationComplete?.()
     }
   })
 
   return (
     <group scale={scale}>
-      {staticCubies.map((c, i) => (
-        <CubieMesh key={`s-${i}-${c.pos.join(',')}`} cubie={c} cubieSize={CUBIE_SIZE} keyPrefix={`s-${i}`} />
+      {staticCubies.map(({ c, i }) => (
+        <CubieMesh key={i} cubie={c} cubieSize={CUBIE_SIZE} />
       ))}
       {animation && (
         <group ref={groupRef}>
-          {rotatingCubies.map((c, i) => (
-            <CubieMesh key={`a-${i}-${c.pos.join(',')}`} cubie={c} cubieSize={CUBIE_SIZE} keyPrefix={`a-${i}`} />
+          {rotatingCubies.map(({ c, i }) => (
+            <CubieMesh key={i} cubie={c} cubieSize={CUBIE_SIZE} />
           ))}
         </group>
       )}
