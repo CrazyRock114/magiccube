@@ -1,0 +1,128 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  background: #0a0a14;
+  color: #e8e8f0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Subtle background grid */
+body {
+  background-image:
+    radial-gradient(circle at 20% 0%, rgba(124, 92, 255, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 80% 100%, rgba(255, 89, 0, 0.05) 0%, transparent 50%),
+    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+  background-attachment: fixed;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a14;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2a3a;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a4a;
+}
+
+@layer components {
+  .btn {
+    @apply px-3 py-1.5 rounded border border-cube-border bg-cube-panel text-cube-text
+           hover:bg-cube-border hover:border-cube-accent transition-colors text-sm font-medium;
+  }
+  .btn-primary {
+    @apply px-3 py-1.5 rounded border border-cube-accent bg-cube-accent text-white
+           hover:opacity-90 transition-opacity text-sm font-semibold;
+  }
+  .btn-ghost {
+    @apply px-2 py-1 rounded text-cube-muted hover:text-cube-text hover:bg-cube-panel transition-colors text-sm;
+  }
+  .card {
+    @apply bg-cube-panel border border-cube-border rounded-lg p-5;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-semibold
+           bg-cube-bg border border-cube-border;
+  }
+  .pill-move {
+    @apply inline-flex items-center justify-center min-w-[2rem] h-7 px-2 rounded
+           font-mono font-bold text-sm border-2;
+  }
+  .h1 {
+    @apply text-4xl md:text-5xl font-extrabold tracking-tight;
+  }
+  .h2 {
+    @apply text-2xl md:text-3xl font-bold tracking-tight;
+  }
+  .h3 {
+    @apply text-xl font-semibold;
+  }
+  .lead {
+    @apply text-cube-muted text-lg leading-relaxed;
+  }
+}
+
+/* Cube sticker (used in 2D mini-cubes) */
+.sticker {
+  width: 100%;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+.sticker.U { background: #f5f5f5; }
+.sticker.D { background: #ffd500; }
+.sticker.F { background: #009b48; color: rgba(255,255,255,0.7); }
+.sticker.B { background: #0046ad; color: rgba(255,255,255,0.7); }
+.sticker.L { background: #ff5900; }
+.sticker.R { background: #b71234; color: rgba(255,255,255,0.7); }
+.sticker.gap { background: transparent; border-color: transparent; }
+
+.face-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  width: 100%;
+  max-width: 6rem;
+}
+.face-grid .sticker { aspect-ratio: 1; }
+
+/* Mini-cube for inline visualization */
+.mini-cube {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 4px;
+  width: 6rem;
+  height: 4.5rem;
+}
+.mini-cube .face-cell {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+}
