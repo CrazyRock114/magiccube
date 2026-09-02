@@ -10,8 +10,13 @@
 
 import { useState, useRef, useCallback, useMemo } from 'react'
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
+import { InteractiveStepCard } from '../components/InteractiveStepCard'
 import { newCube, applyMoveInPlace, cloneCube, isSolved, parseMoves } from '../cube/state'
 import { CubeState } from '../cube/state'
+import {
+  checkWhiteCross, checkFirstLayer, checkSecondLayer, checkTopCross,
+  checkTopFace, checkCornersPermuted, checkSolved,
+} from '../cube/solveCheck'
 
 // ==================== 工具 ====================
 
@@ -203,7 +208,164 @@ function StepCard({
 
 // ==================== 阶段一：LBL（入门）====================
 
+interface LBLSpec {
+  stepNumber: number
+  title: string
+  goal: string
+  hint: string
+  checker: (state: CubeState) => boolean
+  seed: number
+  algorithm?: { name: string; notation: string; when?: string }
+  tips?: string[]
+  warnings?: string[]
+}
+
+// 7 步定义：每步的标题、目标、提示、检测函数、scramble seed
+const LBL_STEPS: LBLSpec[] = [
+  {
+    stepNumber: 1,
+    title: '底层十字 (Down Cross)',
+    goal: '把 4 个含白面的棱块放到 D 层，白色面朝下。',
+    hint: 'D 面 4 个 edge sticker 全是白色（朝下）',
+    checker: checkWhiteCross,
+    seed: 1001,
+    tips: [
+      '不需要公式 — 全靠手感和预判。挑一个白棱，先把它的白色转到 D 面，再调整它的"另一面颜色"跟相邻中心块匹配。',
+      '每放一个白棱，其他已经放好的会被打乱 — 这是正常的。',
+    ],
+    warnings: [
+      '新手常见：先看 U 面再绕。改习惯：永远先在 U 面找一个白棱，跟着白色面走。',
+    ],
+  },
+  {
+    stepNumber: 2,
+    title: '底层角块 (Down Corners)',
+    goal: '把 4 个含白面的角块放到 D 层 4 个角上，白面朝下。',
+    hint: 'D 面 9 个 sticker 全是白色',
+    checker: checkFirstLayer,
+    seed: 1002,
+    algorithm: {
+      name: '右下角换位 (R\' D\' R D)',
+      notation: "R' D' R D",
+      when: 'D 层角块在 D 层但位置错（白色在右面或前面）',
+    },
+    tips: [
+      '算法叫 "right-hand trigger"，练熟了所有 LBL 步骤都用它。',
+      '做法：找 D 层一个含白棱块的角，白色不在 D 面 → 把它转到 R-U-F 角 → 重复 R\' D\' R D 直到白色朝下。',
+    ],
+    warnings: [
+      'D 转动时 D 层会跟着转，但不影响 R\' D\' R D 算法逻辑 — D 是算法的"传送带"。',
+    ],
+  },
+  {
+    stepNumber: 3,
+    title: '第二层棱块 (Second Layer Edges)',
+    goal: '把 4 个不含黄色的中层棱块插入中层，每块两侧颜色匹配相邻中心块。',
+    hint: '4 个中层 edge 都在中层且颜色匹配',
+    checker: checkSecondLayer,
+    seed: 1003,
+    algorithm: {
+      name: '右侧插入 (U R U\' R\' U\' F\' U F)',
+      notation: "U R U' R' U' F' U F",
+      when: '顶层有一个非黄棱块要插到右侧。镜像版用于左侧。',
+    },
+    tips: [
+      '这一步骤对新手最难 — 因为它需要"先选边、再选面"。',
+      '做之前：先转 U 把目标棱块的颜色（不是黄的）放到中心块匹配的位置。然后看棱块的另一个面是朝 R 还是 L。',
+      '如果找不到匹配的颜色对（顶层只剩含黄棱块），跳到 Step 4 — OLL 时会把它弄出来。',
+    ],
+    warnings: [
+      '常见错误：选了黄棱块做这一步 — 黄棱块是顶面的，不属于中层。',
+    ],
+  },
+  {
+    stepNumber: 4,
+    title: '顶面十字 (Top Cross)',
+    goal: '把 U 面 4 个棱块转成黄色（让它们形成十字形 — 中心黄 + 4 棱黄）。',
+    hint: 'U 面 4 个 edge sticker 全是黄色',
+    checker: checkTopCross,
+    seed: 1004,
+    algorithm: {
+      name: 'F R U R\' U\' F\' (Fruruf)',
+      notation: "F R U R' U' F'",
+      when: '没有 yellow cross：U 面一个黄棱都没有、或只有 1 个、或只有 1 条线',
+    },
+    tips: [
+      '7 种 U 棱朝向分 3 类：点（0 黄）、L（2 黄相邻）、线（2 黄对角）。',
+      '点 → 1 次 Fruruf 变 L，L → 1 次 Fruruf 变线，线 → 1 次 Fruruf 变十字。',
+    ],
+    warnings: [
+      '不要用 4 步 R U R\' U\' — 那只能转 90° 棱块、不能从点变 L。',
+    ],
+  },
+  {
+    stepNumber: 5,
+    title: '顶面定向 (2-Look OLL: Orient Last Layer)',
+    goal: '让 U 面 9 个块全部变黄（包括中心和角）。',
+    hint: 'U 面 9 个 sticker 全是黄色',
+    checker: checkTopFace,
+    seed: 1005,
+    algorithm: {
+      name: 'Sune (R U R\' U R U2 R\')',
+      notation: "R U R' U R U2 R'",
+      when: 'Sune：U 面 1 个角黄、3 个不是（"鱼形"）。Anti-Sune 镜像。',
+    },
+    tips: [
+      '2-Look OLL = 2 步：先做十字（4 个棱都对 — Step 4 已搞定），再做角。',
+      '7 种角朝向 = 2 类：Sune 系（3 个）+ Anti-Sune 系（3 个）+ 已好（1 个）。',
+    ],
+    warnings: [
+      'Sune 用错方向会破坏十字。如果转完后十字没了，从 Step 4 重新来。',
+    ],
+  },
+  {
+    stepNumber: 6,
+    title: '顶层角块定位 (2-Look PLL: Permute Last Layer, Corners)',
+    goal: '让 4 个顶层角块各自回到正确位置（颜色跟 3 个中心都对齐）。',
+    hint: '4 个顶层角位置+朝向都对',
+    checker: checkCornersPermuted,
+    seed: 1006,
+    algorithm: {
+      name: 'T-perm (R U R\' U\' R\' F R2 U\' R\' U\' R U R\' F\')',
+      notation: "R U R' U' R' F R2 U' R' U' R U R' F'",
+      when: '对角 2 个角需要互换（"对角"或"相邻"对换）',
+    },
+    tips: [
+      '7 种角置换 = 2 类：A-perm 系（对角 3-cycle）+ T-perm（对角 2-swap）。',
+      'T-perm 自反 — T T = I。',
+    ],
+    warnings: [
+      'A-perm 和 T-perm 容易记混 — 多练几次找感觉。',
+    ],
+  },
+  {
+    stepNumber: 7,
+    title: '顶层棱块定位 (2-Look PLL: Edges)',
+    goal: '让顶层 4 个棱块回到正确位置，魔方完成！',
+    hint: '整魔方还原（solved）',
+    checker: checkSolved,
+    seed: 1007,
+    algorithm: {
+      name: 'U-perm (R U\' R U R U R U\' R\' U\' R2)',
+      notation: "R U' R U R U R U' R' U' R2",
+      when: '3 棱 3-cycle（"三棱循环"）。镜像版用于反方向。',
+    },
+    tips: [
+      '4 种棱置换 = 3 类：E-perm（对侧 2-swap）、U-perm（3-cycle CW）、U-perm\'（3-cycle CCW）、H-perm（对侧 2-swap）。',
+      '做完 Sune/T-perm 之后做 U-perm — 这是经典的 2-look PLL 套路。',
+    ],
+    warnings: [
+      'U-perm 和 U-perm 镜像容易弄错 — 关键是看 3-cycle 的方向。',
+    ],
+  },
+]
+
 function BeginnerSection() {
+  // 7 步解锁链：完成第 N 步 → 解锁第 N+1 步
+  const [completed, setCompleted] = useState<Set<number>>(() => new Set([0]))  // Step 1 永远解锁
+  const completedCount = completed.size - 1  // 减去初始的 0（"已解锁 Step 1"）
+  const allDone = completedCount === LBL_STEPS.length
+
   return (
     <section>
       <SectionTitle
@@ -215,154 +377,90 @@ function BeginnerSection() {
         <DifficultyBadge level="入门" color="#10b981" />
         <span className="text-xs text-cube-muted">适合：刚学完记号、想解第一个魔方</span>
       </div>
-      <p className="text-sm text-cube-text/90 leading-relaxed mb-6">
+      <p className="text-sm text-cube-text/90 leading-relaxed mb-4">
         LBL（Layer By Layer）是最古老也最直觉的方法。核心思路是"一层一层解"——
         先做底面十字，再放 4 个底面角，然后放第二层 4 个棱块，最后做顶面。
         7 步，每步目标单一，不需要"先看后面会怎样"。代价是步数多，但每个步骤都能用"几个常用算法"搞定。
       </p>
 
-      <StepCard
-        step="Step 1"
-        title="白色十字 (White Cross)"
-        goal="把 4 个含白面的棱块放到 D 层，每个白色面朝下，且白色棱块的两个颜色跟中心块对齐（白-红棱块放在红-绿中心块之间）。"
-        tips={[
-          '不需要公式 — 全靠手感和预判。挑一个白棱，先把它的白色转到 D 面，再调整它的"另一面颜色"跟相邻中心块匹配。',
-          '每放一个白棱，其他已经放好的会被打乱 — 这是正常的。',
-          '做法提示：先做 D 层所有 4 个白棱（不一定要匹配中心块），再做一遍把"错位的"换到正确位置。',
-        ]}
-        warnings={[
-          '新手常见：先看 U 面再绕。改习惯：永远先在 U 面找一个白棱，跟着白色面走。',
-        ]}
-      />
-
-      <StepCard
-        step="Step 2"
-        title="白色第一层角块 (White Corners)"
-        goal="把 4 个含白面的角块放到 D 层 4 个角上，白面朝下。完成时 D 面应该全是白。"
-        algorithm={{
-          name: '右下角换位 (R\' D\' R D)',
-          notation: "R' D' R D",
-          when: 'D 层角块在 D 层但位置错（白色在右面或前面）',
-        }}
-        tips={[
-          '算法叫 "right-hand trigger"，练熟了所有 LBL 步骤都用它。',
-          '做法：找 D 层一个含白棱块的角，白色不在 D 面 → 把它转到 R-U-F 角 → 重复 R\' D\' R D 直到白色朝下。',
-          '看不见的步骤：每次 R\' D\' R D 后停下来看白色朝向。如果白在右面就再来一次（在前面或左面也要再来）。',
-        ]}
-        warnings={[
-          '注意：D 转动时 D 层会跟着转，但不影响 R\' D\' R D 算法逻辑 — D 是算法的"传送带"。',
-        ]}
-      />
-
-      <StepCard
-        step="Step 3"
-        title="第二层棱块 (Second Layer Edges)"
-        goal="把 4 个不含黄色的中层棱块插入中层（FR/RB/BL/LF 位置），每块两侧颜色匹配相邻中心块。"
-        algorithm={{
-          name: '右侧插入 (U R U\' R\' U\' F\' U F)',
-          notation: "U R U' R' U' F' U F",
-          when: '顶层有一个非黄棱块要插到右侧。镜像版 U\' L\' U L U F U\' F\' 用于左侧。',
-        }}
-        tips={[
-          '这一步骤对新手最难 — 因为它需要"先选边、再选面"。',
-          '做之前：先转 U 把目标棱块的颜色（不是黄的）放到中心块匹配的位置。然后看棱块的另一个面是朝 R 还是 L（决定用右版还是左版算法）。',
-          '如果找不到匹配的颜色对（顶层只剩含黄棱块），跳到 Step 4 — OLL 时会把它弄出来。',
-        ]}
-        warnings={[
-          '常见错误：选了黄棱块做这一步 — 黄棱块是顶面的，不属于中层。',
-          '判断错边：右版算法 = 棱块从 UR 进 FR。左版 = 棱块从 UL 进 FL。镜像关系要背熟。',
-        ]}
-      />
-
-      <StepCard
-        step="Step 4"
-        title="黄色十字 (Yellow Cross)"
-        goal="把 U 面 4 个非中心棱块转成黄色（让它们形成“十”字形 — 中心黄 + 4 棱黄）。"
-        algorithm={{
-          name: 'F R U R\' U\' F\' (Fruruf)',
-          notation: "F R U R' U' F'",
-          when: '没有 yellow cross：U 面一个黄棱都没有、或只有 1 个、或只有 1 条线',
-        }}
-        tips={[
-          '7 种 U 棱朝向分 3 类：点（0 黄）、L（2 黄相邻）、线（2 黄对角）。',
-          '点 → 1 次 Fruruf 变 L，L → 1 次 Fruruf 变线，线 → 1 次 Fruruf 变十字。',
-          '也可以直接背"对什么状态用什么" — Fruruf 是万能起点。',
-        ]}
-        warnings={[
-          '不要用 4 步 R U R\' U\' — 那只能转 90° 棱块、不能从点变 L。',
-        ]}
-      />
-
-      <StepCard
-        step="Step 5"
-        title="顶面定向 (2-Look OLL: Orient Last Layer)"
-        goal="让 U 面 9 个块全部变黄（包括中心和角）。U 面整面都是黄，但顶层的 4 个角和 4 个棱块还没定位好。"
-        algorithm={{
-          name: 'Sune (R U R\' U R U2 R\') + Anti-Sune (L\' U\' L U\' L\' U2 L)',
-          notation: "R U R' U R U2 R'",
-          when: 'Sune：U 面 1 个角黄、3 个不是（"鱼形"）。Anti-Sune 镜像。',
-        }}
-        tips={[
-          '2-Look OLL = 2 步：先做十字（4 个棱都对 — Step 4 已搞定），再做角。',
-          '7 种角朝向 = 2 类：Sune 系（3 个）+ Anti-Sune 系（3 个）+ 已好（1 个）。',
-          'Sune × 6 = identity（6 阶），Sune × 3 = Anti-Sune。',
-        ]}
-        warnings={[
-          'Sune 用错方向会破坏十字。如果转完后十字没了，从 Step 4 重新来。',
-        ]}
-      />
-
-      <StepCard
-        step="Step 6"
-        title="顶层角块定位 (2-Look PLL: Permute Last Layer, Corners)"
-        goal="让 4 个顶层角块各自回到正确位置（颜色跟 3 个中心都对齐），但角块朝向可能还差。"
-        algorithm={{
-          name: 'T-perm (R U R\' U\' R\' F R2 U\' R\' U\' R U R\' F\')',
-          notation: "R U R' U' R' F R2 U' R' U' R U R' F'",
-          when: '对角 2 个角需要互换（"对角"或"相邻"对换）',
-        }}
-        tips={[
-          '7 种角置换 = 2 类：A-perm 系（对角 3-cycle）+ T-perm（对角 2-swap）。',
-          'T-perm 自反 — T T = I。A-perm 不是，A-perm 三次变 A-perm 镜像。',
-        ]}
-        warnings={[
-          '一个常见错：A-perm 和 T-perm 容易记混 — 多练几次找感觉。',
-        ]}
-      />
-
-      <StepCard
-        step="Step 7"
-        title="顶层棱块定位 (2-Look PLL: Edges)"
-        goal="让顶层 4 个棱块回到正确位置（包括 Sune 已对的角也跟正确中心对齐），魔方完成！"
-        algorithm={{
-          name: 'U-perm (R U\' R U R U R U\' R\' U\' R2)',
-          notation: "R U' R U R U R U' R' U' R2",
-          when: '3 棱 3-cycle（"三棱循环"）。镜像版 U\' R U\' R\' U\' R\' U\' R U R U2 用于反方向。',
-        }}
-        tips={[
-          '4 种棱置换 = 3 类：E-perm（对侧 2-swap）、U-perm（3-cycle CW）、U-perm\'（3-cycle CCW）、H-perm（对侧 2-swap，等同 E 反方向）。',
-          '做完 Sune/T-perm 之后做 U-perm — 这是经典的 2-look PLL 套路。',
-        ]}
-        warnings={[
-          'U-perm 和 U-perm 镜像容易弄错 — 关键是看 3-cycle 的方向。',
-        ]}
-      />
-
-      <div className="card bg-cube-accent/10 border-l-4 border-cube-accent mt-6">
-        <div className="font-semibold mb-2">🎉 入门 LBL 完整流程</div>
-        <div className="text-sm space-y-1">
-          <div>1. <b>白十字</b> → 4 个白棱在 D 层，匹配中心</div>
-          <div>2. <b>白角块</b> → R\' D\' R D 重复直到 4 个白角到位</div>
-          <div>3. <b>二层棱</b> → 顶层棱按 U R U\' R\' U\' F\' U F / U\' L\' U L U F U\' F\' 插入</div>
-          <div>4. <b>黄十字</b> → F R U R\' U\' F\' 重复</div>
-          <div>5. <b>顶面定向</b> → Sune (R U R\' U R U2 R\') 重复</div>
-          <div>6. <b>顶层角定位</b> → T-perm (或 A-perm) 重复</div>
-          <div>7. <b>顶层棱定位</b> → U-perm (或 H-perm) 重复</div>
+      {/* 进度条 + 解锁提示 */}
+      <div className="card bg-cube-bg/40 mb-4">
+        <div className="flex items-center gap-3 mb-2">
+          <span className="text-sm font-semibold">学习进度</span>
+          <span className="pill-move bg-cube-accent text-cube-bg">{completedCount} / {LBL_STEPS.length}</span>
+          {allDone && <span className="pill-move bg-green-500 text-white">🎉 LBL 已掌握</span>}
         </div>
-        <div className="mt-3 text-xs text-cube-muted">
-          总公式数：4 个（白角 / 中层 / 黄十字 / Sune-Tperm-Uperm）
+        <div className="w-full h-2 bg-cube-bg rounded overflow-hidden">
+          <div
+            className="h-full bg-cube-accent transition-all duration-500"
+            style={{ width: `${(completedCount / LBL_STEPS.length) * 100}%` }}
+          />
+        </div>
+        <div className="text-xs text-cube-muted mt-2">
+          每张互动卡下面有独立的迷你魔方 + 18 个公式按钮 + 撤销/重置。达成当前步目标后，下一步自动解锁。
         </div>
       </div>
+
+      {/* 7 个互动步骤 */}
+      {LBL_STEPS.map((s, i) => (
+        <div key={s.stepNumber} className="space-y-2">
+          <InteractiveStepCard
+            stepNumber={s.stepNumber}
+            title={s.title}
+            goal={s.goal}
+            hint={s.hint}
+            checker={s.checker}
+            scrambleSeed={s.seed}
+            locked={s.stepNumber > 1 && !completed.has(s.stepNumber - 1)}
+            completed={completed.has(s.stepNumber)}
+            onComplete={() => setCompleted((prev) => {
+              const next = new Set(prev)
+              next.add(s.stepNumber)
+              return next
+            })}
+          />
+          {/* 步骤下方技巧/警告/算法提示（达成后才显示，作为参考） */}
+          {completed.has(s.stepNumber) && (s.tips || s.warnings || s.algorithm) && (
+            <div className="ml-4 mb-4 text-sm space-y-2 border-l-2 border-cube-accent/40 pl-4">
+              {s.algorithm && (
+                <div className="bg-cube-bg px-3 py-2 font-mono">
+                  <div className="text-cube-muted text-xs mb-1">关键公式</div>
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="font-semibold">{s.algorithm.name}</span>
+                    <span className="text-cube-accent">{s.algorithm.notation}</span>
+                  </div>
+                  {s.algorithm.when && <div className="text-xs text-cube-muted mt-1">使用时机：{s.algorithm.when}</div>}
+                </div>
+              )}
+              {s.tips && s.tips.length > 0 && (
+                <div className="text-cube-text/80">
+                  <div className="text-cube-muted text-xs mb-1">💡 技巧</div>
+                  <ul className="list-disc ml-5 space-y-1">{s.tips.map((t, j) => <li key={j}>{t}</li>)}</ul>
+                </div>
+              )}
+              {s.warnings && s.warnings.length > 0 && (
+                <div className="text-cube-text/80">
+                  <div className="text-red-300 text-xs mb-1">⚠️ 常见错误</div>
+                  <ul className="list-disc ml-5 space-y-1">{s.warnings.map((w, j) => <li key={j}>{w}</li>)}</ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* 完成全部 7 步的祝贺卡 */}
+      {allDone && (
+        <div className="card bg-gradient-to-r from-green-500/10 to-cube-accent/15 border-l-4 border-green-500 mt-6">
+          <div className="font-semibold mb-2 text-lg">🎉 恭喜！LBL 7 步全部完成</div>
+          <div className="text-sm space-y-1">
+            <div>你已经走完了 3×3 还原的<b>完整入门流程</b>。</div>
+            <div className="text-cube-muted mt-2">
+              接下来：<b>阶段二 · 2-Look CFOP</b> 教你把 OLL/PLL 各拆 2 段，平均步数砍半到 ~60 步。
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
