@@ -19,11 +19,15 @@ export interface StepGuidanceProps {
   status: 'locked' | 'active' | 'completed'
   // 可选：计算当前主 cube 距离 step 目标还差多少（基于 sticker 颜色匹配）
   progress?: { matched: number; total: number }
+  // 当前是否正在播放示例公式（disabled 按钮用）
+  isApplyingExample?: boolean
+  // 应用示例公式按钮回调
+  onApplyExample?: (notation: string) => void
 }
 
 export function StepGuidance({
   stepNumber, title, goal, hint, algorithm, tips, warnings,
-  status, progress,
+  status, progress, isApplyingExample, onApplyExample,
 }: StepGuidanceProps) {
   return (
     <div className={`card mb-4 transition-all ${
@@ -75,6 +79,16 @@ export function StepGuidance({
                 <span className="text-cube-accent">{algorithm.notation}</span>
               </div>
               {algorithm.when && <div className="text-xs text-cube-muted mt-2">使用时机：{algorithm.when}</div>}
+              {onApplyExample && status === 'active' && (
+                <button
+                  onClick={() => onApplyExample(algorithm.notation)}
+                  disabled={isApplyingExample}
+                  className="mt-3 px-3 py-1.5 rounded bg-cube-accent text-cube-bg font-semibold text-sm hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
+                  title="把示例公式应用到顶部主魔方（带动画）"
+                >
+                  {isApplyingExample ? '⏵ 播放中...' : '▶ 应用示例公式到主魔方'}
+                </button>
+              )}
             </div>
           )}
 

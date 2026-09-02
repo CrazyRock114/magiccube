@@ -12,11 +12,11 @@ import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
 import { TopCubeSection } from '../components/TopCubeSection'
 import { StepGuidance } from '../components/StepGuidance'
-import { newCube, applyMoveInPlace, cloneCube, isSolved, parseMoves } from '../cube/state'
+import { newCube, applyMoveInPlace, cloneCube, isSolved, parseMoves, parseMoveToken } from '../cube/state'
 import { CubeState } from '../cube/state'
 import {
   checkWhiteCross, checkFirstLayer, checkSecondLayer, checkTopCross,
-  checkTopFace, checkCornersPermuted, checkSolved,
+  checkTopFace, checkCornersPermuted, checkSolved, progressForStep,
 } from '../cube/solveCheck'
 
 // ==================== 工具 ====================
@@ -275,22 +275,44 @@ interface BeginnerSectionProps {
   history: HistoryEntry[]
   canUndo: boolean
   canRedo: boolean
+  isApplyingExample: boolean
+  showFaceLabels: boolean
   onApplyMove: (m: string) => void
+  onApplyExample: (notation: string) => Promise<void> | void
   onScramble: () => void
   onReset: () => void
   onUndo: () => void
   onRedo: () => void
+  onToggleFaceLabels: () => void
 }
 
 function BeginnerSection({
   mainState, scrambled, completed, history, canUndo, canRedo,
-  onApplyMove, onScramble, onReset, onUndo, onRedo,
+  isApplyingExample, showFaceLabels,
+  onApplyMove, onApplyExample, onScramble, onReset, onUndo, onRedo,
+  onToggleFaceLabels,
 }: BeginnerSectionProps) {
   // Step 1 永远 active（不需要等上一步）
   const isUnlocked = (n: number) => n === 1 || completed.has(n - 1)
   const isCompleted = (n: number) => completed.has(n)
   const completedCount = completed.size
   const allDone = completedCount === LBL_STEPS.length
+
+  // 找到当前 active step（第一个未完成且解锁的）
+  const activeStep = LBL_STEPS.find(
+    (s) => !isCompleted(s.stepNumber) && isUnlocked(s.stepNumber),
+  )
+  const currentTask = activeStep
+    ? `Step ${activeStep.stepNumber} · ${activeStep.title} — ${activeStep.goal}`
+    : allDone
+    ? '全部完成！你已经走完 3×3 还原的完整入门流程 🎉'
+    : '点上方 🎲 打乱开始还原'
+  const progressText = activeStep && scrambled
+    ? (() => {
+        const p = progressForStep(mainState, activeStep.stepNumber)
+        return `${p.matched} / ${p.total}`
+      })()
+    : undefined
 
   return (
     <section>
@@ -324,7 +346,7 @@ function BeginnerSection({
         </div>
         <div className="text-xs text-cube-muted mt-2">
           所有操作在<b>顶部主魔方</b>完成。点🎲打乱 → 用公式按钮或输入公式 → 达成当前步目标自动解锁下一步。
-          每一步操作都会自动记录到下方"复盘记录"。
+          每一步操作都会自动记录到下方"复盘记录"。推荐开 <b>🏷 标注</b> 看清 6 个面。
         </div>
       </div>
 
@@ -336,11 +358,16 @@ function BeginnerSection({
         totalSteps={LBL_STEPS.length}
         canUndo={canUndo}
         canRedo={canRedo}
+        externalPlaying={isApplyingExample}
+        showFaceLabels={showFaceLabels}
+        onToggleFaceLabels={onToggleFaceLabels}
         onApplyMoves={onApplyMove}
         onScramble={onScramble}
         onReset={onReset}
         onUndo={onUndo}
         onRedo={onRedo}
+        currentTask={currentTask}
+        progressText={progressText}
       />
 
       {/* 7 步引导（只读 + 状态徽章） */}
@@ -349,6 +376,7 @@ function BeginnerSection({
         const status: 'locked' | 'active' | 'completed' =
           isCompleted(s.stepNumber) ? 'completed' :
           isUnlocked(s.stepNumber) ? 'active' : 'locked'
+        const progress = scrambled ? progressForStep(mainState, s.stepNumber) : undefined
         return (
           <StepGuidance
             key={s.stepNumber}
@@ -360,6 +388,9 @@ function BeginnerSection({
             tips={s.tips}
             warnings={s.warnings}
             status={status}
+            progress={progress}
+            isApplyingExample={isApplyingExample}
+            onApplyExample={onApplyExample}
           />
         )
       })}
@@ -710,8 +741,12 @@ export function Solve() {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [historyId, setHistoryId] = useState(0)
   const [completed, setCompleted] = useState<Set<number>>(() => new Set())
+  const [showFaceLabels, setShowFaceLabels] = useState(true)  // 默认开（新手需要）
+  const [isApplyingExample, setIsApplyingExample] = useState(false)
   const completedRef = useRef(completed)
   completedRef.current = completed
+  const applyingRef = useRef(false)
+  applyingRef.current = isApplyingExample
 
   // 自动检测：mainState 变 → 检查 7 步是否新达成
   useEffect(() => {
@@ -748,6 +783,29 @@ export function Solve() {
     }
     setMainState(next)
     appendHistory(m)
+  }
+
+  // 应用示例公式队列：逐个 move 用 450ms 间隔（同步 TopCubeSection 内部动画时长）
+  async function onApplyExample(notation: string) {
+    if (applyingRef.current) return
+    let moves: string[]
+    try {
+      moves = parseMoves(notation)
+    } catch (e) {
+      console.warn('parse failed:', notation, e)
+      return
+    }
+    if (moves.length === 0) return
+    setIsApplyingExample(true)
+    for (const m of moves) {
+      try { parseMoveToken(m) } catch (e) {
+        console.warn('bad move in example:', m, e)
+        break
+      }
+      onApplyMove(m)
+      await new Promise((r) => setTimeout(r, 450))
+    }
+    setIsApplyingExample(false)
   }
 
   function scramble() {
@@ -850,11 +908,15 @@ export function Solve() {
           history={history}
           canUndo={undoStack.length > 0}
           canRedo={redoStack.length > 0}
+          isApplyingExample={isApplyingExample}
+          showFaceLabels={showFaceLabels}
           onApplyMove={onApplyMove}
+          onApplyExample={onApplyExample}
           onScramble={scramble}
           onReset={reset}
           onUndo={undo}
           onRedo={redo}
+          onToggleFaceLabels={() => setShowFaceLabels((v) => !v)}
         />
       </div>
       <div id="stage-intermediate"><IntermediateSection /></div>

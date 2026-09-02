@@ -147,6 +147,162 @@ export function checkCornersPermuted(state: CubeState): boolean {
 /** Step 7: 顶层棱定位 + 整魔方还原 — 等价于 solved */
 export const checkSolved = isSolved
 
+// ==================== 进度计算（per-step matched / total）====================
+// 给"当前任务"条 + StepGuidance 进度条用。matched 是当前 state 已满足该步条件
+// 的 sticker 数量；total 是完全达成需要的 sticker 数量。
+
+/** 拿到朝某个面方向的 cubie + sticker 列表（含 cubiePos） */
+interface OrientedSticker {
+  cubiePos: Vec3
+  color: Face
+  worldNormal: Vec3
+}
+
+function stickersFacingWithNormal(state: CubeState, face: Face): OrientedSticker[] {
+  const target = FACE_NORMAL[face]
+  const out: OrientedSticker[] = []
+  for (const cu of state.cubies) {
+    for (const s of cu.stickers) {
+      const wn = rotateVec(cu.ori, s.normal)
+      if (
+        Math.abs(wn[0] - target[0]) < 0.5 &&
+        Math.abs(wn[1] - target[1]) < 0.5 &&
+        Math.abs(wn[2] - target[2]) < 0.5
+      ) {
+        out.push({ cubiePos: cu.pos, color: s.color, worldNormal: wn as Vec3 })
+      }
+    }
+  }
+  return out
+}
+
+function isEdgeSlot(pos: Vec3, yRef: number): boolean {
+  return (
+    Math.abs(pos[1] - yRef) < 0.5 &&
+    Math.abs(Math.abs(pos[0]) + Math.abs(pos[2]) - 1) < 0.5
+  )
+}
+
+function isCornerSlot(pos: Vec3, yRef: number): boolean {
+  return (
+    Math.abs(pos[1] - yRef) < 0.5 &&
+    Math.abs(Math.abs(pos[0]) - 1) < 0.5 &&
+    Math.abs(Math.abs(pos[2]) - 1) < 0.5
+  )
+}
+
+function isMiddleEdgeCubie(cu: { pos: Vec3 }): boolean {
+  const [x, y, z] = cu.pos
+  return (
+    Math.abs(y) < 0.5 &&
+    Math.abs(Math.abs(x) - 1) < 0.5 &&
+    Math.abs(Math.abs(z) - 1) < 0.5
+  )
+}
+
+/** Step 1 进度：D 面 4 edge 是 D 色 */
+function progressWhiteCross(state: CubeState): { matched: number; total: number } {
+  const ds = stickersFacingWithNormal(state, 'D')
+  const edges = ds.filter((s) => isEdgeSlot(s.cubiePos, -1))
+  const matched = edges.filter((e) => e.color === 'D').length
+  return { matched, total: 4 }
+}
+
+/** Step 2 进度：D 面 9 sticker 是 D 色 */
+function progressFirstLayer(state: CubeState): { matched: number; total: number } {
+  const ds = stickersFacingWithNormal(state, 'D')
+  const matched = ds.filter((s) => s.color === 'D').length
+  return { matched, total: 9 }
+}
+
+/** Step 3 进度：4 个中层 edge 颜色匹配 */
+function progressSecondLayer(state: CubeState): { matched: number; total: number } {
+  let matched = 0
+  for (const cu of state.cubies) {
+    if (!isMiddleEdgeCubie(cu)) continue
+    if (cu.stickers.length !== 2) continue
+    let allOk = true
+    for (const s of cu.stickers) {
+      const wn = rotateVec(cu.ori, s.normal)
+      let expected: Face
+      if (Math.abs(wn[0]) > 0.5) expected = wn[0] > 0 ? 'R' : 'L'
+      else if (Math.abs(wn[2]) > 0.5) expected = wn[2] > 0 ? 'F' : 'B'
+      else { allOk = false; break }
+      if (s.color !== expected) { allOk = false; break }
+    }
+    if (allOk) matched++
+  }
+  return { matched, total: 4 }
+}
+
+/** Step 4 进度：U 面 4 edge 是 U 色 */
+function progressTopCross(state: CubeState): { matched: number; total: number } {
+  const us = stickersFacingWithNormal(state, 'U')
+  const edges = us.filter((s) => isEdgeSlot(s.cubiePos, 1))
+  const matched = edges.filter((e) => e.color === 'U').length
+  return { matched, total: 4 }
+}
+
+/** Step 5 进度：U 面 9 sticker 是 U 色 */
+function progressTopFace(state: CubeState): { matched: number; total: number } {
+  const us = stickersFacingWithNormal(state, 'U')
+  const matched = us.filter((s) => s.color === 'U').length
+  return { matched, total: 9 }
+}
+
+/** Step 6 进度：4 个顶层角 3 sticker 颜色都匹配 */
+function progressCornersPermuted(state: CubeState): { matched: number; total: number } {
+  let matchedSticker = 0
+  for (const cu of state.cubies) {
+    if (!isCornerSlot(cu.pos, 1)) continue
+    for (const s of cu.stickers) {
+      const wn = rotateVec(cu.ori, s.normal)
+      let expected: Face
+      if (Math.abs(wn[1] - 1) < 0.5) expected = 'U'
+      else if (Math.abs(wn[0]) > 0.5) expected = wn[0] > 0 ? 'R' : 'L'
+      else if (Math.abs(wn[2]) > 0.5) expected = wn[2] > 0 ? 'F' : 'B'
+      else continue
+      if (s.color === expected) matchedSticker++
+    }
+  }
+  return { matched: matchedSticker, total: 12 }  // 4 corners × 3 stickers
+}
+
+/** Step 7 进度：整魔方 solved（54 sticker 全对） */
+function progressSolved(state: CubeState): { matched: number; total: number } {
+  let matched = 0
+  let total = 0
+  for (const cu of state.cubies) {
+    for (const s of cu.stickers) {
+      total++
+      const wn = rotateVec(cu.ori, s.normal)
+      let expected: Face
+      if (Math.abs(wn[1] - 1) < 0.5) expected = 'U'
+      else if (Math.abs(wn[1] + 1) < 0.5) expected = 'D'
+      else if (Math.abs(wn[0] - 1) < 0.5) expected = 'R'
+      else if (Math.abs(wn[0] + 1) < 0.5) expected = 'L'
+      else if (Math.abs(wn[2] - 1) < 0.5) expected = 'F'
+      else if (Math.abs(wn[2] + 1) < 0.5) expected = 'B'
+      else continue
+      if (s.color === expected) matched++
+    }
+  }
+  return { matched, total }
+}
+
+export function progressForStep(state: CubeState, stepNumber: number): { matched: number; total: number } {
+  switch (stepNumber) {
+    case 1: return progressWhiteCross(state)
+    case 2: return progressFirstLayer(state)
+    case 3: return progressSecondLayer(state)
+    case 4: return progressTopCross(state)
+    case 5: return progressTopFace(state)
+    case 6: return progressCornersPermuted(state)
+    case 7: return progressSolved(state)
+    default: return { matched: 0, total: 1 }
+  }
+}
+
 // 全部检测函数列表，按 Step 顺序
 export const LBL_STEPS = [
   { key: 'whiteCross', name: '底层十字', checker: checkWhiteCross, hint: 'D 面 4 个 edge sticker 都是白' },

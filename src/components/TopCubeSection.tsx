@@ -20,11 +20,16 @@ export interface TopCubeSectionProps {
   totalSteps: number
   canUndo: boolean
   canRedo: boolean
+  externalPlaying?: boolean  // 父组件用 setTimeout 链触发示例公式时，disable 内部按钮
+  showFaceLabels: boolean
+  onToggleFaceLabels: () => void
   onApplyMoves: (moveSeq: string) => void
   onScramble: () => void
   onReset: () => void
   onUndo: () => void
   onRedo: () => void
+  currentTask?: string  // 顶部"当前任务"条
+  progressText?: string
 }
 
 const MOVE_BUTTONS = [
@@ -39,8 +44,9 @@ const MODIFIERS = ['', "'", '2']
 
 export function TopCubeSection({
   mainState, scrambled, completedCount, totalSteps,
-  canUndo, canRedo,
+  canUndo, canRedo, externalPlaying, showFaceLabels, onToggleFaceLabels,
   onApplyMoves, onScramble, onReset, onUndo, onRedo,
+  currentTask, progressText,
 }: TopCubeSectionProps) {
   const [pendingMove, setPendingMove] = useState<string | null>(null)
   const [moveInput, setMoveInput] = useState('')
@@ -80,6 +86,11 @@ export function TopCubeSection({
     }
   }, [applyOne])
 
+  // 把 applySequence 通过 ref 暴露给父组件的"应用示例公式"按钮
+  const applySequenceRef = useRef(applySequence)
+  applySequenceRef.current = applySequence
+  const isExternalLocked = externalPlaying || isPlayingRef.current
+
   const handleScrambleClick = () => {
     if (completedCount > 0 || canUndo) {
       setShowConfirm('scramble')
@@ -105,7 +116,12 @@ export function TopCubeSection({
             {scrambled ? '还原中' : '未打乱'} · 已完成 {completedCount} / {totalSteps} 步
           </h3>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={onToggleFaceLabels}
+            className={`btn text-sm ${showFaceLabels ? 'bg-cube-accent text-cube-bg' : ''}`}
+            title="开关：6 个面 U/R/F/D/L/B 标注"
+          >🏷 标注 {showFaceLabels ? '开' : '关'}</button>
           <button
             onClick={handleScrambleClick}
             className="btn text-sm"
@@ -129,6 +145,20 @@ export function TopCubeSection({
         </div>
       </div>
 
+      {/* 当前任务条（新手引导） */}
+      {currentTask && (
+        <div className="bg-cube-accent/10 border-l-4 border-cube-accent px-4 py-3 mb-3 flex items-start gap-3">
+          <div className="text-2xl shrink-0">🎯</div>
+          <div className="flex-1">
+            <div className="text-xs text-cube-accent uppercase tracking-widest font-mono mb-1">当前任务</div>
+            <div className="text-sm font-semibold">{currentTask}</div>
+            {progressText && (
+              <div className="text-xs text-cube-muted font-mono mt-1">进度：{progressText}</div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="grid lg:grid-cols-[1fr_1.2fr] gap-4 items-start">
         {/* 左侧：3D 魔方 */}
         <div>
@@ -137,9 +167,10 @@ export function TopCubeSection({
             pendingMove={pendingMove}
             onMoveApplied={() => { /* 动画完成由 applyOne 处理 */ }}
             height={360}
+            showFaceLabels={showFaceLabels}
           />
           <div className="text-xs text-cube-muted font-mono mt-2 text-center">
-            {pendingMove ? `⏵ 播放中: ${pendingMove}` : (isPlayingRef.current ? '⏵ 队列中...' : '○ 待命')}
+            {pendingMove ? `⏵ 播放中: ${pendingMove}` : (isExternalLocked ? '⏵ 队列中...' : '○ 待命')}
           </div>
         </div>
 
@@ -152,7 +183,7 @@ export function TopCubeSection({
               value={moveInput}
               onChange={(e) => setMoveInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !isPlayingRef.current) {
+                if (e.key === 'Enter' && !isExternalLocked) {
                   applySequence(moveInput).then(() => setMoveInput(''))
                 }
               }}
@@ -161,7 +192,7 @@ export function TopCubeSection({
             />
             <button
               onClick={() => applySequence(moveInput).then(() => setMoveInput(''))}
-              disabled={isPlayingRef.current}
+              disabled={isExternalLocked}
               className="btn text-sm disabled:opacity-30"
             >▶ 应用</button>
           </div>
@@ -173,7 +204,7 @@ export function TopCubeSection({
                 <button
                   key={b.code + mod}
                   onClick={() => applyOne(b.code + mod)}
-                  disabled={isPlayingRef.current}
+                  disabled={isExternalLocked}
                   className="px-2 py-1.5 rounded font-mono text-sm font-bold transition hover:scale-105 disabled:opacity-50"
                   style={{ backgroundColor: b.color, color: b.textColor }}
                   title={`转 ${b.code}${mod}`}

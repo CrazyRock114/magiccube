@@ -8,7 +8,7 @@
 
 import { useRef, useState, useEffect, useMemo, useCallback } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
+import { OrbitControls, Html } from '@react-three/drei'
 import * as THREE from 'three'
 import {
   CubeState, Cubie, Sticker, Axis,
@@ -120,9 +120,10 @@ interface CubeSceneProps {
   onAnimationComplete?: () => void
   scale?: number
   enableControls?: boolean
+  showFaceLabels?: boolean
 }
 
-function CubeScene({ state, animation, onAnimationComplete, scale = 1, enableControls = true }: CubeSceneProps) {
+function CubeScene({ state, animation, onAnimationComplete, scale = 1, enableControls = true, showFaceLabels = false }: CubeSceneProps) {
   const groupRef = useRef<THREE.Group>(null)
   const completedRef = useRef(false)
   const animRef = useRef<AnimationState | null>(null)
@@ -199,7 +200,56 @@ function CubeScene({ state, animation, onAnimationComplete, scale = 1, enableCon
       {enableControls && (
         <OrbitControls enablePan={false} minDistance={2} maxDistance={20} enableDamping dampingFactor={0.1} />
       )}
+      {showFaceLabels && <FaceLabels size={state.size} />}
     </group>
+  )
+}
+
+const FACE_LABEL_COLOR: Record<string, string> = {
+  U: '#f5f5f5', R: '#b71234', F: '#009b48', D: '#ffd500', L: '#ff5900', B: '#0046ad',
+}
+const FACE_LABEL_TEXT: Record<string, string> = {
+  U: '#0a0a14', R: '#fff', F: '#fff', D: '#0a0a14', L: '#0a0a14', B: '#fff',
+}
+
+function FaceLabels({ size }: { size: number }) {
+  // 距离魔方 0.7 单位（3x3 半径 1.5，每边出 0.7 = 2.2 位置）
+  const r = (size - 1) / 2 + 0.9
+  const faces: Array<{ key: string; pos: [number, number, number] }> = [
+    { key: 'U', pos: [0, r, 0] },
+    { key: 'D', pos: [0, -r, 0] },
+    { key: 'R', pos: [r, 0, 0] },
+    { key: 'L', pos: [-r, 0, 0] },
+    { key: 'F', pos: [0, 0, r] },
+    { key: 'B', pos: [0, 0, -r] },
+  ]
+  return (
+    <>
+      {faces.map((f) => (
+        <Html
+          key={f.key}
+          position={f.pos}
+          center
+          distanceFactor={8}
+          occlude={false}
+          zIndexRange={[10, 0]}
+          style={{ pointerEvents: 'none' }}
+        >
+          <div
+            className="rounded-full font-mono font-bold flex items-center justify-center border-2"
+            style={{
+              width: 28,
+              height: 28,
+              fontSize: 14,
+              backgroundColor: FACE_LABEL_COLOR[f.key],
+              color: FACE_LABEL_TEXT[f.key],
+              borderColor: 'rgba(255,255,255,0.5)',
+              boxShadow: '0 0 6px rgba(0,0,0,0.6)',
+            }}
+          >{f.key}</div>
+        </Html>
+      ))}
+    </>
   )
 }
 
@@ -211,6 +261,7 @@ interface Cube3DProps {
   scale?: number
   height?: string | number
   showControls?: boolean
+  showFaceLabels?: boolean
 }
 
 export function Cube3D({
@@ -221,6 +272,7 @@ export function Cube3D({
   scale = 1,
   height = 480,
   showControls = true,
+  showFaceLabels = false,
 }: Cube3DProps) {
   const [animation, setAnimation] = useState<AnimationState | null>(null)
   const lastProcessedRef = useRef<string | null>(null)
@@ -275,6 +327,7 @@ export function Cube3D({
           onAnimationComplete={handleComplete}
           scale={scale}
           enableControls={showControls}
+          showFaceLabels={showFaceLabels}
         />
       </Canvas>
     </div>
