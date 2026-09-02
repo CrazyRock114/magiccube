@@ -1,10 +1,14 @@
 // 异形魔方：Skewb / Pyraminx / Megaminx 的可交互 3D 教学
-// 3D 渲染用 cubing.js 的 TwistyPlayer，自带 state engine + 动画
-// 三个 section 共享 <PuzzleCard> 组件，避免代码重复
+// Skewb 用自写 R3F 渲染器（Skewb3D），真 3D 角块 + 转动动画
+// Pyraminx/Megaminx 仍用 cubing.js（facelet stickering，待后续重写）
 
 import { useEffect, useRef, useState } from 'react'
 // @ts-ignore - cubing.js 没有官方 TS 类型声明 for 3rd party use
 import { TwistyPlayer } from 'cubing/twisty'
+import { Skewb3D, makeSkewbAnim } from '../components/Skewb3D'
+import {
+  SkewbState, newSkewbState, applySkewbMove, randomSkewbScramble,
+} from '../cube/skewb'
 
 // ==================== 各 puzzle 的 move 集 + 元数据 ====================
 
@@ -121,7 +125,57 @@ function randomScramble(moves: string[], len = 12): string {
   return result.join(' ')
 }
 
-// ==================== PuzzleCard：单个 puzzle 的可交互卡片 ====================
+// ==================== Skewb3D-渲染的卡片（用自写 R3F）====================
+
+function SkewbCard({ spec }: { spec: PuzzleSpec }) {
+  const [state, setState] = useState<SkewbState>(newSkewbState())
+  const [anim, setAnim] = useState<ReturnType<typeof makeSkewbAnim> | null>(null)
+  const animTimer = useRef<number | null>(null)
+
+  const doMove = (m: string) => {
+    if (anim) return // 动画进行中，忽略
+    const newState = applySkewbMove(state, m)
+    setAnim(makeSkewbAnim(m, 400))
+    // 动画 400ms 后 commit state
+    if (animTimer.current) clearTimeout(animTimer.current)
+    animTimer.current = window.setTimeout(() => {
+      setState(newState)
+      setAnim(null)
+    }, 400)
+  }
+  const undoLast = () => {
+    // 简单：不支持 undo（用户可以重置）
+  }
+  const reset = () => {
+    if (animTimer.current) clearTimeout(animTimer.current)
+    setState(newSkewbState())
+    setAnim(null)
+  }
+  const scramble = () => {
+    if (anim) return
+    const moves = randomSkewbScramble(12).split(' ')
+    let cur = newSkewbState()
+    for (const m of moves) {
+      cur = applySkewbMove(cur, m)
+    }
+    setState(cur)
+    setAnim(null)
+  }
+
+  return (
+    <PuzzleCardLayout
+      spec={spec}
+      alg={''}
+      doMove={doMove}
+      undoLast={undoLast}
+      reset={reset}
+      scramble={scramble}
+      viewer={<Skewb3D state={state} anim={anim} width="100%" height="100%" />}
+    />
+  )
+}
+
+// ==================== 通用 PuzzleCard（cubing.js 给 Pyraminx/Megaminx 用）====================
 
 function PuzzleCard({ spec }: { spec: PuzzleSpec }) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -141,10 +195,6 @@ function PuzzleCard({ spec }: { spec: PuzzleSpec }) {
     containerRef.current.appendChild(player)
     playerRef.current = player
 
-    // cubing.js 的 TwistyPlayer 用 IntersectionObserver 懒渲染：
-    // 视口外的 player 永远不画。Pyraminx/Megaminx 在异形页下方，
-    // 用户没滚到时是空黑框。我们直接调原型链上的 intersectedCallback
-    // symbol，强制立即渲染。
     const forceIntersected = () => {
       if (!player.isConnected) return
       let proto = Object.getPrototypeOf(player)
@@ -159,7 +209,6 @@ function PuzzleCard({ spec }: { spec: PuzzleSpec }) {
         try { player[ic]() } catch { /* ignore */ }
       }
     }
-    // 多试几次：50ms / 200ms / 500ms 兜底 React StrictMode + 异步 layout
     const t1 = setTimeout(forceIntersected, 50)
     const t2 = setTimeout(forceIntersected, 200)
     const t3 = setTimeout(forceIntersected, 500)
@@ -173,10 +222,9 @@ function PuzzleCard({ spec }: { spec: PuzzleSpec }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spec.id])
 
-  // alg 变化时更新
   useEffect(() => {
     if (playerRef.current) {
-      try { playerRef.current.alg = alg } catch (e) { /* 第一次 set 时可能还没 ready */ }
+      try { playerRef.current.alg = alg } catch (e) { /* ignore */ }
     }
   }, [alg])
 
@@ -192,6 +240,39 @@ function PuzzleCard({ spec }: { spec: PuzzleSpec }) {
   }
   const reset = () => setAlg('')
   const scramble = () => setAlg(randomScramble(spec.scrambleMoves))
+
+  return (
+    <PuzzleCardLayout
+      spec={spec}
+      alg={alg}
+      doMove={doMove}
+      undoLast={undoLast}
+      reset={reset}
+      scramble={scramble}
+      viewer={<div ref={containerRef} className="w-full h-full" />}
+    />
+  )
+}
+
+// ==================== 公共卡片布局（heading + 3D viewer + buttons + text）====================
+
+function PuzzleCardLayout({
+  spec,
+  alg,
+  doMove,
+  undoLast,
+  reset,
+  scramble,
+  viewer,
+}: {
+  spec: PuzzleSpec
+  alg: string
+  doMove: (m: string) => void
+  undoLast: () => void
+  reset: () => void
+  scramble: () => void
+  viewer: React.ReactNode
+}) {
 
   return (
     <section className="card">
@@ -213,10 +294,11 @@ function PuzzleCard({ spec }: { spec: PuzzleSpec }) {
         {/* 3D 渲染区 */}
         <div className="space-y-2">
           <div
-            ref={containerRef}
             className="rounded border border-cube-border bg-cube-bg/50 overflow-hidden mx-auto"
             style={{ width: '100%', maxWidth: '480px', aspectRatio: '3/2' }}
-          />
+          >
+            {viewer}
+          </div>
           <div className="flex flex-wrap gap-1.5 items-center">
             <span className="text-[10px] text-cube-muted font-mono mr-1">操作：</span>
             {spec.moves.map(m => (
@@ -314,11 +396,14 @@ export function OtherShapes() {
           拖动 3D 视图、点按钮应用单个 move、🎲 打乱看解法。每种 puzzle 的几何、状态数、God Number 都标在右上。
         </p>
         <p className="text-cube-muted text-sm leading-relaxed">
-          渲染用的是 <code className="font-mono text-cube-text">cubing/twisty</code> 库（js.cubing.net）— 它内置了所有 WCA 异形的状态引擎、动画和 stickering，所以我们可以专注于"教什么"而不是"怎么画"。
+          Skewb 用自写的 R3F 渲染器（真 3D 角块 + 转动动画），Pyraminx/Megaminx 仍用 cubing.js（facelet 渲染，待重写）。所有异形都支持：拖动 3D 视图、点按钮应用单个 move、🎲 打乱看解法。每种 puzzle 的几何、状态数、God Number 都标在右上。
         </p>
       </header>
 
-      {PUZZLES.map(p => <PuzzleCard key={p.id} spec={p} />)}
+      {PUZZLES.map(p => p.id === 'skewb'
+        ? <SkewbCard key={p.id} spec={p} />
+        : <PuzzleCard key={p.id} spec={p} />
+      )}
 
       <MoreShapes />
     </div>
