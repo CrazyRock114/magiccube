@@ -8,9 +8,10 @@
 //
 // 每步设计：目标 + 关键算法 + 常见错误 + 互动演示（看具体状态）
 
-import { useState, useRef, useCallback, useMemo } from 'react'
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
-import { InteractiveStepCard } from '../components/InteractiveStepCard'
+import { TopCubeSection } from '../components/TopCubeSection'
+import { StepGuidance } from '../components/StepGuidance'
 import { newCube, applyMoveInPlace, cloneCube, isSolved, parseMoves } from '../cube/state'
 import { CubeState } from '../cube/state'
 import {
@@ -19,35 +20,6 @@ import {
 } from '../cube/solveCheck'
 
 // ==================== 工具 ====================
-
-function makeScrambled(seed: number, length = 20): CubeState {
-  // 用 seed 做伪随机 scramble（保证可复现）
-  const c = newCube(3)
-  const moves = ['U', 'D', 'R', 'L', 'F', 'B', "U'", "D'", "R'", "L'", "F'", "B'"]
-  let last = -1
-  let s = seed
-  for (let i = 0; i < length; i++) {
-    s = (s * 1103515245 + 12345) & 0x7fffffff
-    let m = moves[s % moves.length]
-    let face = m[0]
-    // 不要连续转同面
-    let attempts = 0
-    while (face.charCodeAt(0) === last && attempts < 5) {
-      s = (s * 1103515245 + 12345) & 0x7fffffff
-      m = moves[s % moves.length]
-      face = m[0]
-      attempts++
-    }
-    applyMoveInPlace(c, m)
-    last = face.charCodeAt(0)
-  }
-  return c
-}
-
-function moveCount(s: CubeState): number {
-  // 估算步数：cubies 数量 - 26 (3x3 solved 是 26 cubies)
-  return Math.max(0, s.cubies.length - 26)
-}
 
 function DifficultyBadge({ level, color }: { level: string; color: string }) {
   return (
@@ -60,82 +32,18 @@ function DifficultyBadge({ level, color }: { level: string; color: string }) {
   )
 }
 
-// ==================== 互动演示组件 ====================
+interface HistoryEntry {
+  id: number
+  moveSeq: string
+  at: number
+  stepAtTime: number
+}
 
-function StepDemo({ initialState, demoMoves }: { initialState?: CubeState; demoMoves?: string[] }) {
-  // 演示某个状态或应用一系列 move 的过程
-  const [state, setState] = useState<CubeState>(() => initialState ?? makeScrambled(42, 15))
-  const [pendingMove, setPendingMove] = useState<string | null>(null)
-  const currentMoveRef = useRef<string | null>(null)
-
-  const onMoveApplied = useCallback(() => {
-    const finished = currentMoveRef.current
-    if (finished) {
-      setState(c => {
-        const nc = cloneCube(c)
-        applyMoveInPlace(nc, finished)
-        return nc
-      })
-    }
-    currentMoveRef.current = null
-    setPendingMove(null)
-  }, [])
-
-  const playMove = (m: string) => {
-    currentMoveRef.current = m
-    setPendingMove(m)
-  }
-
-  const reset = (newState: CubeState) => {
-    setState(newState)
-    setPendingMove(null)
-    currentMoveRef.current = null
-  }
-
-  const doScramble = () => {
-    const s = makeScrambled(Math.floor(Math.random() * 10000), 18)
-    reset(s)
-  }
-
-  const doDemoSequence = async () => {
-    if (!demoMoves) return
-    const moves = parseMoves(demoMoves.join(' '))
-    for (const m of moves) {
-      playMove(m)
-      // 等待动画（400ms 一次 move）
-      await new Promise(r => setTimeout(r, 450))
-    }
-  }
-
-  return (
-    <div className="card bg-cube-bg/30">
-      <div className="grid md:grid-cols-[1fr_auto] gap-4 items-center">
-        <div>
-          <Cube3D
-            state={state}
-            pendingMove={pendingMove}
-            onMoveApplied={onMoveApplied}
-            height={280}
-          />
-        </div>
-        <div className="space-y-2 text-sm">
-          <div className="font-mono text-cube-muted text-xs">
-            {pendingMove ? `应用中: ${pendingMove}` : '（待命）'}
-          </div>
-          <div className="flex flex-col gap-2">
-            <button onClick={doScramble} className="btn text-xs">🎲 打乱</button>
-            {demoMoves && (
-              <button onClick={doDemoSequence} className="btn text-xs">▶ 播放演示</button>
-            )}
-            <button onClick={() => reset(initialState ?? newCube(3))} className="btn text-xs">↺ 重置</button>
-          </div>
-          <div className="mt-3">
-            <MiniCube2D state={state} />
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+function formatTime(ts: number, base: number): string {
+  const sec = Math.floor((ts - base) / 1000)
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
 }
 
 // ==================== 内容 section 组件 ====================
@@ -360,10 +268,28 @@ const LBL_STEPS: LBLSpec[] = [
   },
 ]
 
-function BeginnerSection() {
-  // 7 步解锁链：完成第 N 步 → 解锁第 N+1 步
-  const [completed, setCompleted] = useState<Set<number>>(() => new Set([0]))  // Step 1 永远解锁
-  const completedCount = completed.size - 1  // 减去初始的 0（"已解锁 Step 1"）
+interface BeginnerSectionProps {
+  mainState: CubeState
+  scrambled: boolean
+  completed: Set<number>
+  history: HistoryEntry[]
+  canUndo: boolean
+  canRedo: boolean
+  onApplyMove: (m: string) => void
+  onScramble: () => void
+  onReset: () => void
+  onUndo: () => void
+  onRedo: () => void
+}
+
+function BeginnerSection({
+  mainState, scrambled, completed, history, canUndo, canRedo,
+  onApplyMove, onScramble, onReset, onUndo, onRedo,
+}: BeginnerSectionProps) {
+  // Step 1 永远 active（不需要等上一步）
+  const isUnlocked = (n: number) => n === 1 || completed.has(n - 1)
+  const isCompleted = (n: number) => completed.has(n)
+  const completedCount = completed.size
   const allDone = completedCount === LBL_STEPS.length
 
   return (
@@ -383,9 +309,9 @@ function BeginnerSection() {
         7 步，每步目标单一，不需要"先看后面会怎样"。代价是步数多，但每个步骤都能用"几个常用算法"搞定。
       </p>
 
-      {/* 进度条 + 解锁提示 */}
+      {/* 进度条 + 整体说明 */}
       <div className="card bg-cube-bg/40 mb-4">
-        <div className="flex items-center gap-3 mb-2">
+        <div className="flex items-center gap-3 mb-2 flex-wrap">
           <span className="text-sm font-semibold">学习进度</span>
           <span className="pill-move bg-cube-accent text-cube-bg">{completedCount} / {LBL_STEPS.length}</span>
           {allDone && <span className="pill-move bg-green-500 text-white">🎉 LBL 已掌握</span>}
@@ -397,57 +323,49 @@ function BeginnerSection() {
           />
         </div>
         <div className="text-xs text-cube-muted mt-2">
-          每张互动卡下面有独立的迷你魔方 + 18 个公式按钮 + 撤销/重置。达成当前步目标后，下一步自动解锁。
+          所有操作在<b>顶部主魔方</b>完成。点🎲打乱 → 用公式按钮或输入公式 → 达成当前步目标自动解锁下一步。
+          每一步操作都会自动记录到下方"复盘记录"。
         </div>
       </div>
 
-      {/* 7 个互动步骤 */}
-      {LBL_STEPS.map((s, i) => (
-        <div key={s.stepNumber} className="space-y-2">
-          <InteractiveStepCard
+      {/* 主魔方 section（贯穿整个 Beginner 段） */}
+      <TopCubeSection
+        mainState={mainState}
+        scrambled={scrambled}
+        completedCount={completedCount}
+        totalSteps={LBL_STEPS.length}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onApplyMoves={onApplyMove}
+        onScramble={onScramble}
+        onReset={onReset}
+        onUndo={onUndo}
+        onRedo={onRedo}
+      />
+
+      {/* 7 步引导（只读 + 状态徽章） */}
+      <h3 className="text-xl font-semibold mt-6 mb-3">📖 7 步教学</h3>
+      {LBL_STEPS.map((s) => {
+        const status: 'locked' | 'active' | 'completed' =
+          isCompleted(s.stepNumber) ? 'completed' :
+          isUnlocked(s.stepNumber) ? 'active' : 'locked'
+        return (
+          <StepGuidance
+            key={s.stepNumber}
             stepNumber={s.stepNumber}
             title={s.title}
             goal={s.goal}
             hint={s.hint}
-            checker={s.checker}
-            scrambleSeed={s.seed}
-            locked={s.stepNumber > 1 && !completed.has(s.stepNumber - 1)}
-            completed={completed.has(s.stepNumber)}
-            onComplete={() => setCompleted((prev) => {
-              const next = new Set(prev)
-              next.add(s.stepNumber)
-              return next
-            })}
+            algorithm={s.algorithm}
+            tips={s.tips}
+            warnings={s.warnings}
+            status={status}
           />
-          {/* 步骤下方技巧/警告/算法提示（达成后才显示，作为参考） */}
-          {completed.has(s.stepNumber) && (s.tips || s.warnings || s.algorithm) && (
-            <div className="ml-4 mb-4 text-sm space-y-2 border-l-2 border-cube-accent/40 pl-4">
-              {s.algorithm && (
-                <div className="bg-cube-bg px-3 py-2 font-mono">
-                  <div className="text-cube-muted text-xs mb-1">关键公式</div>
-                  <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="font-semibold">{s.algorithm.name}</span>
-                    <span className="text-cube-accent">{s.algorithm.notation}</span>
-                  </div>
-                  {s.algorithm.when && <div className="text-xs text-cube-muted mt-1">使用时机：{s.algorithm.when}</div>}
-                </div>
-              )}
-              {s.tips && s.tips.length > 0 && (
-                <div className="text-cube-text/80">
-                  <div className="text-cube-muted text-xs mb-1">💡 技巧</div>
-                  <ul className="list-disc ml-5 space-y-1">{s.tips.map((t, j) => <li key={j}>{t}</li>)}</ul>
-                </div>
-              )}
-              {s.warnings && s.warnings.length > 0 && (
-                <div className="text-cube-text/80">
-                  <div className="text-red-300 text-xs mb-1">⚠️ 常见错误</div>
-                  <ul className="list-disc ml-5 space-y-1">{s.warnings.map((w, j) => <li key={j}>{w}</li>)}</ul>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
+        )
+      })}
+
+      {/* 复盘记录 */}
+      {history.length > 0 && <ReviewSection history={history} />}
 
       {/* 完成全部 7 步的祝贺卡 */}
       {allDone && (
@@ -461,6 +379,53 @@ function BeginnerSection() {
           </div>
         </div>
       )}
+    </section>
+  )
+}
+
+function ReviewSection({ history }: { history: HistoryEntry[] }) {
+  // 倒序展示（最新操作在上）
+  const base = history[0]?.at ?? 0
+  return (
+    <section className="card mt-6">
+      <div className="flex items-center gap-2 mb-3">
+        <h2 className="h2">📋 复盘记录</h2>
+        <span className="pill-move bg-cube-bg text-cube-muted">{history.length} 条</span>
+      </div>
+      <p className="text-xs text-cube-muted mb-3">
+        记录你做的每一步操作（含打乱、撤销、重做）。导出你的解法，跟最优解对比。
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-cube-muted text-xs">
+            <tr>
+              <th className="text-left p-2">#</th>
+              <th className="text-left p-2">公式</th>
+              <th className="text-left p-2">时间 (相对开始)</th>
+              <th className="text-left p-2">达成 step</th>
+            </tr>
+          </thead>
+          <tbody className="font-mono">
+            {history.slice().reverse().map((h) => {
+              const realIdx = history.indexOf(h) + 1
+              return (
+                <tr key={h.id} className="border-t border-cube-border">
+                  <td className="p-2 text-cube-muted">{realIdx}</td>
+                  <td className="p-2 text-cube-accent">{h.moveSeq}</td>
+                  <td className="p-2 text-cube-muted">{formatTime(h.at, base)}</td>
+                  <td className="p-2">
+                    {h.stepAtTime > 0 ? (
+                      <span className="text-green-400">Step {h.stepAtTime}</span>
+                    ) : (
+                      <span className="text-cube-muted">—</span>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }
@@ -737,7 +702,109 @@ function ResearchSection() {
 // ==================== 主组件 ====================
 
 export function Solve() {
-  const [activeStage, setActiveStage] = useState<'beginner' | 'intermediate' | 'advanced' | 'research'>('beginner')
+  // 主魔方 state（贯穿整个 Beginner 段）
+  const [mainState, setMainState] = useState<CubeState>(() => newCube(3))
+  const [scrambled, setScrambled] = useState(false)
+  const [undoStack, setUndoStack] = useState<CubeState[]>([])
+  const [redoStack, setRedoStack] = useState<CubeState[]>([])
+  const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [historyId, setHistoryId] = useState(0)
+  const [completed, setCompleted] = useState<Set<number>>(() => new Set())
+  const completedRef = useRef(completed)
+  completedRef.current = completed
+
+  // 自动检测：mainState 变 → 检查 7 步是否新达成
+  useEffect(() => {
+    if (!scrambled) return
+    for (const s of LBL_STEPS) {
+      if (!completedRef.current.has(s.stepNumber) && s.checker(mainState)) {
+        setCompleted((prev) => {
+          if (prev.has(s.stepNumber)) return prev
+          const next = new Set(prev)
+          next.add(s.stepNumber)
+          return next
+        })
+      }
+    }
+  }, [mainState, scrambled])
+
+  function appendHistory(moveSeq: string) {
+    setHistoryId((id) => id + 1)
+    setHistory((h) => [...h, {
+      id: historyId + 1,
+      moveSeq,
+      at: Date.now(),
+      stepAtTime: completedRef.current.size,
+    }])
+  }
+
+  function onApplyMove(m: string) {
+    setUndoStack((s) => [...s, mainState])
+    setRedoStack([])
+    const next = cloneCube(mainState)
+    try { applyMoveInPlace(next, m) } catch (e) {
+      console.warn('bad move:', m, e)
+      return
+    }
+    setMainState(next)
+    appendHistory(m)
+  }
+
+  function scramble() {
+    const s = newCube(3)
+    const moves = ['U', 'D', 'R', 'L', 'F', 'B', "U'", "D'", "R'", "L'", "F'", "B'"]
+    let last = -1
+    let seed = Date.now() % 100000
+    for (let i = 0; i < 25; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      let m = moves[seed % moves.length]
+      let face = m[0]
+      let attempts = 0
+      while (face.charCodeAt(0) === last && attempts < 5) {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff
+        m = moves[seed % moves.length]
+        face = m[0]
+        attempts++
+      }
+      applyMoveInPlace(s, m)
+      last = face.charCodeAt(0)
+    }
+    setUndoStack([])
+    setRedoStack([])
+    setHistoryId((id) => id + 1)
+    setHistory([{ id: 1, moveSeq: '[打乱 25 步]', at: Date.now(), stepAtTime: 0 }])
+    setMainState(s)
+    setScrambled(true)
+    setCompleted(new Set())
+  }
+
+  function reset() {
+    setUndoStack([])
+    setRedoStack([])
+    setHistoryId(0)
+    setHistory([])
+    setMainState(newCube(3))
+    setScrambled(false)
+    setCompleted(new Set())
+  }
+
+  function undo() {
+    if (undoStack.length === 0) return
+    const prev = undoStack[undoStack.length - 1]
+    setUndoStack((s) => s.slice(0, -1))
+    setRedoStack((s) => [...s, mainState])
+    setMainState(prev)
+    appendHistory('[撤销]')
+  }
+
+  function redo() {
+    if (redoStack.length === 0) return
+    const next = redoStack[redoStack.length - 1]
+    setRedoStack((s) => s.slice(0, -1))
+    setUndoStack((s) => [...s, mainState])
+    setMainState(next)
+    appendHistory('[重做]')
+  }
 
   return (
     <div className="space-y-12">
@@ -750,7 +817,7 @@ export function Solve() {
         </p>
       </header>
 
-      {/* 4 段总览卡片 */}
+      {/* 4 段快速跳转 */}
       <section className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { id: 'beginner', num: '01', title: 'LBL 入门', desc: '7 步，4 个公式，~120 步' },
@@ -761,17 +828,11 @@ export function Solve() {
           <button
             key={s.id}
             onClick={() => {
-              setActiveStage(s.id as any)
-              // 滚到对应 section
               setTimeout(() => {
                 document.getElementById(`stage-${s.id}`)?.scrollIntoView({ behavior: 'smooth' })
               }, 50)
             }}
-            className={`card text-left transition-colors ${
-              activeStage === s.id
-                ? 'border-cube-accent bg-cube-accent/10'
-                : 'hover:border-cube-accent/50'
-            }`}
+            className="card text-left transition-colors hover:border-cube-accent/50"
           >
             <div className="text-3xl font-mono font-bold text-cube-accent">{s.num}</div>
             <div className="font-semibold mt-1">{s.title}</div>
@@ -780,15 +841,22 @@ export function Solve() {
         ))}
       </section>
 
-      {/* 当前阶段演示 */}
-      <section className="card bg-cube-bg/30">
-        <div className="text-xs text-cube-muted uppercase tracking-widest mb-2 font-mono">互动演示</div>
-        <h3 className="text-lg font-semibold mb-3">打乱一个魔方 → 看你能做到哪一步</h3>
-        <StepDemo />
-      </section>
-
       {/* 各阶段内容 */}
-      <div id="stage-beginner"><BeginnerSection /></div>
+      <div id="stage-beginner">
+        <BeginnerSection
+          mainState={mainState}
+          scrambled={scrambled}
+          completed={completed}
+          history={history}
+          canUndo={undoStack.length > 0}
+          canRedo={redoStack.length > 0}
+          onApplyMove={onApplyMove}
+          onScramble={scramble}
+          onReset={reset}
+          onUndo={undo}
+          onRedo={redo}
+        />
+      </div>
       <div id="stage-intermediate"><IntermediateSection /></div>
       <div id="stage-advanced"><AdvancedSection /></div>
       <div id="stage-research"><ResearchSection /></div>
