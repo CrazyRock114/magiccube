@@ -2,7 +2,7 @@
 // 3D 渲染用 cubing.js 的 TwistyPlayer，自带 state engine + 动画
 // 三个 section 共享 <PuzzleCard> 组件，避免代码重复
 
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useState } from 'react'
 // @ts-ignore - cubing.js 没有官方 TS 类型声明 for 3rd party use
 import { TwistyPlayer } from 'cubing/twisty'
 
@@ -140,7 +140,36 @@ function PuzzleCard({ spec }: { spec: PuzzleSpec }) {
     })
     containerRef.current.appendChild(player)
     playerRef.current = player
-    return () => { player.remove() }
+
+    // cubing.js 的 TwistyPlayer 用 IntersectionObserver 懒渲染：
+    // 视口外的 player 永远不画。Pyraminx/Megaminx 在异形页下方，
+    // 用户没滚到时是空黑框。我们直接调原型链上的 intersectedCallback
+    // symbol，强制立即渲染。
+    const forceIntersected = () => {
+      if (!player.isConnected) return
+      let proto = Object.getPrototypeOf(player)
+      let ic: symbol | undefined
+      while (proto && !ic) {
+        const syms = Object.getOwnPropertySymbols(proto)
+        ic = syms.find(s => s.description === 'intersectedCallback')
+        if (ic) break
+        proto = Object.getPrototypeOf(proto)
+      }
+      if (ic) {
+        try { player[ic]() } catch { /* ignore */ }
+      }
+    }
+    // 多试几次：50ms / 200ms / 500ms 兜底 React StrictMode + 异步 layout
+    const t1 = setTimeout(forceIntersected, 50)
+    const t2 = setTimeout(forceIntersected, 200)
+    const t3 = setTimeout(forceIntersected, 500)
+
+    return () => {
+      clearTimeout(t1)
+      clearTimeout(t2)
+      clearTimeout(t3)
+      player.remove()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spec.id])
 
