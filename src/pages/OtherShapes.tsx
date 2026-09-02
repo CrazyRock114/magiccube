@@ -1,14 +1,18 @@
 // 异形魔方：Skewb / Pyraminx / Megaminx 的可交互 3D 教学
-// Skewb 用自写 R3F 渲染器（Skewb3D），真 3D 角块 + 转动动画
-// Pyraminx/Megaminx 仍用 cubing.js（facelet stickering，待后续重写）
+// Skewb / Pyraminx 用自写 R3F 渲染器（真 3D 块 + 转动动画）
+// Megaminx 仍用 cubing.js（facelet 渲染，待重写）
 
 import { useEffect, useRef, useState } from 'react'
 // @ts-ignore - cubing.js 没有官方 TS 类型声明 for 3rd party use
 import { TwistyPlayer } from 'cubing/twisty'
 import { Skewb3D, makeSkewbAnim } from '../components/Skewb3D'
+import { Pyraminx3D, makePyraminxAnim } from '../components/Pyraminx3D'
 import {
   SkewbState, newSkewbState, applySkewbMove, randomSkewbScramble,
 } from '../cube/skewb'
+import {
+  PyraminxState, newPyraminxState, applyPyraminxMove, randomPyraminxScramble,
+} from '../cube/pyraminx'
 
 // ==================== 各 puzzle 的 move 集 + 元数据 ====================
 
@@ -136,16 +140,13 @@ function SkewbCard({ spec }: { spec: PuzzleSpec }) {
     if (anim) return // 动画进行中，忽略
     const newState = applySkewbMove(state, m)
     setAnim(makeSkewbAnim(m, 400))
-    // 动画 400ms 后 commit state
     if (animTimer.current) clearTimeout(animTimer.current)
     animTimer.current = window.setTimeout(() => {
       setState(newState)
       setAnim(null)
     }, 400)
   }
-  const undoLast = () => {
-    // 简单：不支持 undo（用户可以重置）
-  }
+  const undoLast = () => {}
   const reset = () => {
     if (animTimer.current) clearTimeout(animTimer.current)
     setState(newSkewbState())
@@ -171,6 +172,61 @@ function SkewbCard({ spec }: { spec: PuzzleSpec }) {
       reset={reset}
       scramble={scramble}
       viewer={<Skewb3D state={state} anim={anim} width="100%" height="100%" />}
+    />
+  )
+}
+
+// ==================== Pyraminx3D-渲染的卡片 ====================
+
+function PyraminxCard({ spec }: { spec: PuzzleSpec }) {
+  const [state, setState] = useState<PyraminxState>(newPyraminxState())
+  const [anim, setAnim] = useState<ReturnType<typeof makePyraminxAnim> | null>(null)
+  const animTimer = useRef<number | null>(null)
+
+  // 简化：把用户按钮的 R/L/U/B 翻译成 cubing 的 r/l/u/b
+  const translateMove = (m: string): string => {
+    const isPrime = m.endsWith("'")
+    const base = m[0].toLowerCase()
+    return base + (isPrime ? "'" : "")
+  }
+
+  const doMove = (m: string) => {
+    if (anim) return
+    const cubeMove = translateMove(m)
+    const newState = applyPyraminxMove(state, cubeMove)
+    setAnim(makePyraminxAnim(cubeMove, 400))
+    if (animTimer.current) clearTimeout(animTimer.current)
+    animTimer.current = window.setTimeout(() => {
+      setState(newState)
+      setAnim(null)
+    }, 400)
+  }
+  const undoLast = () => {}
+  const reset = () => {
+    if (animTimer.current) clearTimeout(animTimer.current)
+    setState(newPyraminxState())
+    setAnim(null)
+  }
+  const scramble = () => {
+    if (anim) return
+    const moves = randomPyraminxScramble(12).split(' ')
+    let cur = newPyraminxState()
+    for (const m of moves) {
+      cur = applyPyraminxMove(cur, m)
+    }
+    setState(cur)
+    setAnim(null)
+  }
+
+  return (
+    <PuzzleCardLayout
+      spec={spec}
+      alg={''}
+      doMove={doMove}
+      undoLast={undoLast}
+      reset={reset}
+      scramble={scramble}
+      viewer={<Pyraminx3D state={state} anim={anim} width="100%" height="100%" />}
     />
   )
 }
@@ -402,6 +458,8 @@ export function OtherShapes() {
 
       {PUZZLES.map(p => p.id === 'skewb'
         ? <SkewbCard key={p.id} spec={p} />
+        : p.id === 'pyraminx'
+        ? <PyraminxCard key={p.id} spec={p} />
         : <PuzzleCard key={p.id} spec={p} />
       )}
 
