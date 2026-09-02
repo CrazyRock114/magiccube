@@ -1,18 +1,19 @@
 // 异形魔方：Skewb / Pyraminx / Megaminx 的可交互 3D 教学
-// Skewb / Pyraminx 用自写 R3F 渲染器（真 3D 块 + 转动动画）
-// Megaminx 仍用 cubing.js（facelet 渲染，待重写）
+// 三个全部用自写 R3F 渲染器（真 3D 块 + 转动动画），不再用 cubing.js
 
 import { useEffect, useRef, useState } from 'react'
-// @ts-ignore - cubing.js 没有官方 TS 类型声明 for 3rd party use
-import { TwistyPlayer } from 'cubing/twisty'
 import { Skewb3D, makeSkewbAnim } from '../components/Skewb3D'
 import { Pyraminx3D, makePyraminxAnim } from '../components/Pyraminx3D'
+import { Megaminx3D, makeMegaminxAnim } from '../components/Megaminx3D'
 import {
   SkewbState, newSkewbState, applySkewbMove, randomSkewbScramble,
 } from '../cube/skewb'
 import {
   PyraminxState, newPyraminxState, applyPyraminxMove, randomPyraminxScramble,
 } from '../cube/pyraminx'
+import {
+  MegaminxState, newMegaminxState, applyMegaminxMove, randomMegaminxScramble,
+} from '../cube/megaminx'
 
 // ==================== 各 puzzle 的 move 集 + 元数据 ====================
 
@@ -231,83 +232,57 @@ function PyraminxCard({ spec }: { spec: PuzzleSpec }) {
   )
 }
 
-// ==================== 通用 PuzzleCard（cubing.js 给 Pyraminx/Megaminx 用）====================
+// ==================== Megaminx3D-渲染的卡片 ====================
 
-function PuzzleCard({ spec }: { spec: PuzzleSpec }) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const playerRef = useRef<any>(null)
-  const [alg, setAlg] = useState('')
-
-  // 初始化 TwistyPlayer
-  useEffect(() => {
-    if (!containerRef.current) return
-    const player = new (TwistyPlayer as any)({
-      puzzle: spec.id,
-      alg,
-      background: 'none',
-      controlPanel: 'none',
-      tempoScale: 0.8,
-    })
-    containerRef.current.appendChild(player)
-    playerRef.current = player
-
-    const forceIntersected = () => {
-      if (!player.isConnected) return
-      let proto = Object.getPrototypeOf(player)
-      let ic: symbol | undefined
-      while (proto && !ic) {
-        const syms = Object.getOwnPropertySymbols(proto)
-        ic = syms.find(s => s.description === 'intersectedCallback')
-        if (ic) break
-        proto = Object.getPrototypeOf(proto)
-      }
-      if (ic) {
-        try { player[ic]() } catch { /* ignore */ }
-      }
-    }
-    const t1 = setTimeout(forceIntersected, 50)
-    const t2 = setTimeout(forceIntersected, 200)
-    const t3 = setTimeout(forceIntersected, 500)
-
-    return () => {
-      clearTimeout(t1)
-      clearTimeout(t2)
-      clearTimeout(t3)
-      player.remove()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec.id])
-
-  useEffect(() => {
-    if (playerRef.current) {
-      try { playerRef.current.alg = alg } catch (e) { /* ignore */ }
-    }
-  }, [alg])
+function MegaminxCard({ spec }: { spec: PuzzleSpec }) {
+  const [state, setState] = useState<MegaminxState>(newMegaminxState())
+  const [anim, setAnim] = useState<ReturnType<typeof makeMegaminxAnim> | null>(null)
+  const animTimer = useRef<number | null>(null)
 
   const doMove = (m: string) => {
-    setAlg(prev => prev ? prev + ' ' + m : m)
+    if (anim) return
+    const newState = applyMegaminxMove(state, m)
+    setAnim(makeMegaminxAnim(m, 400))
+    if (animTimer.current) clearTimeout(animTimer.current)
+    animTimer.current = window.setTimeout(() => {
+      setState(newState)
+      setAnim(null)
+    }, 400)
   }
-  const undoLast = () => {
-    setAlg(prev => {
-      const parts = prev.trim().split(/\s+/)
-      parts.pop()
-      return parts.join(' ')
-    })
+  const undoLast = () => {}
+  const reset = () => {
+    if (animTimer.current) clearTimeout(animTimer.current)
+    setState(newMegaminxState())
+    setAnim(null)
   }
-  const reset = () => setAlg('')
-  const scramble = () => setAlg(randomScramble(spec.scrambleMoves))
+  const scramble = () => {
+    if (anim) return
+    const moves = randomMegaminxScramble(12).split(' ')
+    let cur = newMegaminxState()
+    for (const m of moves) {
+      cur = applyMegaminxMove(cur, m)
+    }
+    setState(cur)
+    setAnim(null)
+  }
 
   return (
     <PuzzleCardLayout
       spec={spec}
-      alg={alg}
+      alg={''}
       doMove={doMove}
       undoLast={undoLast}
       reset={reset}
       scramble={scramble}
-      viewer={<div ref={containerRef} className="w-full h-full" />}
+      viewer={<Megaminx3D state={state} anim={anim} width="100%" height="100%" />}
     />
   )
+}
+
+// ==================== 通用 PuzzleCard（保留以防 fallback，Megaminx 已不用）====================
+
+function PuzzleCard({ spec }: { spec: PuzzleSpec }) {
+  return <MegaminxCard spec={spec} />
 }
 
 // ==================== 公共卡片布局（heading + 3D viewer + buttons + text）====================
@@ -452,7 +427,7 @@ export function OtherShapes() {
           拖动 3D 视图、点按钮应用单个 move、🎲 打乱看解法。每种 puzzle 的几何、状态数、God Number 都标在右上。
         </p>
         <p className="text-cube-muted text-sm leading-relaxed">
-          Skewb 用自写的 R3F 渲染器（真 3D 角块 + 转动动画），Pyraminx/Megaminx 仍用 cubing.js（facelet 渲染，待重写）。所有异形都支持：拖动 3D 视图、点按钮应用单个 move、🎲 打乱看解法。每种 puzzle 的几何、状态数、God Number 都标在右上。
+          三种异形都用自写的 R3F 渲染器（真 3D 块 + 转动动画），不再用 cubing.js（cubing 对异形只渲染外壳贴纸，不显示单独块）。所有异形都支持：拖动 3D 视图、点按钮应用单个 move、🎲 打乱看解法。每种 puzzle 的几何、状态数、God Number 都标在右上。
         </p>
       </header>
 
