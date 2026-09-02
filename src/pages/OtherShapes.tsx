@@ -185,8 +185,8 @@ function PuzzleCard({ spec }: { spec: PuzzleSpec }) {
         <div className="space-y-2">
           <div
             ref={containerRef}
-            className="rounded border border-cube-border bg-cube-bg/50 overflow-hidden"
-            style={{ width: '100%', aspectRatio: '1' }}
+            className="rounded border border-cube-border bg-cube-bg/50 overflow-hidden mx-auto"
+            style={{ width: '100%', maxWidth: '480px', aspectRatio: '3/2' }}
           />
           <div className="flex flex-wrap gap-1.5 items-center">
             <span className="text-[10px] text-cube-muted font-mono mr-1">操作：</span>
