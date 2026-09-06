@@ -73,6 +73,19 @@ export function StepGuidance({
             </div>
           )}
 
+          {onPlayStepDemo && status === 'active' && (
+            <div className="mb-3">
+              <button
+                onClick={() => onPlayStepDemo(stepNumber)}
+                disabled={isApplyingExample}
+                className="px-4 py-2 rounded bg-green-500 text-white font-semibold text-sm hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2 shadow-md"
+                title="重置主魔方到 solved + 慢速演示该 step 的算法（600ms/步）"
+              >
+                {isApplyingExample ? '⏵ 演示中...' : `▶ 演示 Step ${stepNumber} (慢速 600ms/步)`}
+              </button>
+            </div>
+          )}
+
           {algorithm && (
             <div className="bg-cube-bg border-l-2 border-cube-accent px-4 py-3 mb-3 font-mono">
               <div className="text-cube-muted text-xs mb-1">关键公式</div>
@@ -89,16 +102,6 @@ export function StepGuidance({
                   title="把示例公式应用到顶部主魔方（带动画）"
                 >
                   {isApplyingExample ? '⏵ 播放中...' : '▶ 应用示例公式到主魔方'}
-                </button>
-              )}
-              {onPlayStepDemo && status === 'active' && (
-                <button
-                  onClick={() => onPlayStepDemo(stepNumber)}
-                  disabled={isApplyingExample}
-                  className="mt-2 ml-2 px-3 py-1.5 rounded bg-green-500 text-white font-semibold text-sm hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
-                  title="重置主魔方到 solved + 慢速演示该 step 的算法（600ms/步）"
-                >
-                  {isApplyingExample ? '⏵ 演示中...' : `▶ 演示 Step ${stepNumber}`}
                 </button>
               )}
             </div>
