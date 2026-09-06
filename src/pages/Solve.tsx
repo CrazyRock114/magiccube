@@ -13,7 +13,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
 import { TopCubeSection } from '../components/TopCubeSection'
 import { StepGuidance } from '../components/StepGuidance'
-import { newCube, applyMoveInPlace, cloneCube, isSolved, parseMoves, parseMoveToken } from '../cube/state'
+import { newCube, applyMoveInPlace, cloneCube, isSolved, parseMoves, parseMoveToken, getStickerString } from '../cube/state'
 import { CubeState } from '../cube/state'
 import {
   checkWhiteCross, checkFirstLayer, checkSecondLayer, checkTopCross,
@@ -285,13 +285,14 @@ interface BeginnerSectionProps {
   onUndo: () => void
   onRedo: () => void
   onToggleFaceLabels: () => void
+  onPlayFullDemo: () => Promise<void>
 }
 
 function BeginnerSection({
   mainState, scrambled, completed, history, canUndo, canRedo,
   isApplyingExample, showFaceLabels,
   onApplyMove, onApplyExample, onScramble, onReset, onUndo, onRedo,
-  onToggleFaceLabels,
+  onToggleFaceLabels, onPlayFullDemo,
 }: BeginnerSectionProps) {
   // Step 1 永远 active（不需要等上一步）
   const isUnlocked = (n: number) => n === 1 || completed.has(n - 1)
@@ -338,6 +339,14 @@ function BeginnerSection({
           <span className="text-sm font-semibold">学习进度</span>
           <span className="pill-move bg-cube-accent text-cube-bg">{completedCount} / {LBL_STEPS.length}</span>
           {allDone && <span className="pill-move bg-green-500 text-white">🎉 LBL 已掌握</span>}
+          <button
+            onClick={onPlayFullDemo}
+            disabled={isApplyingExample}
+            className="ml-auto px-4 py-1.5 rounded bg-cube-accent text-cube-bg font-semibold text-sm hover:opacity-90 disabled:opacity-30 flex items-center gap-2"
+            title="自动打乱 6 步 + 用 Kociemba 算法还原到 solved"
+          >
+            {isApplyingExample ? '⏵ 演示播放中...' : '▶ 一键演示完整流程'}
+          </button>
         </div>
         <div className="w-full h-2 bg-cube-bg rounded overflow-hidden">
           <div
@@ -348,6 +357,7 @@ function BeginnerSection({
         <div className="text-xs text-cube-muted mt-2">
           所有操作在<b>顶部主魔方</b>完成。点🎲打乱 → 用公式按钮或输入公式 → 达成当前步目标自动解锁下一步。
           每一步操作都会自动记录到下方"复盘记录"。推荐开 <b>🏷 标注</b> 看清 6 个面。
+          <b>▶ 一键演示完整流程</b>：自动打乱 6 步 → 调 Kociemba 算法 → 逐步还原到 solved，让你看完整 cycle。
         </div>
       </div>
 
@@ -748,6 +758,9 @@ export function Solve() {
   completedRef.current = completed
   const applyingRef = useRef(false)
   applyingRef.current = isApplyingExample
+  // 同步跟踪最新 mainState（playFullDemo 用 mainStateRef.current 拿最新值，避免 stale closure）
+  const mainStateRef = useRef<CubeState>(mainState)
+  mainStateRef.current = mainState
   const [searchParams, setSearchParams] = useSearchParams()
 
   // 接收 Scan 页传过来的解法，invert F/B（my engine F = WCA F，但 kociemba F = WCA F'）
@@ -813,13 +826,13 @@ export function Solve() {
   }, [mainState, scrambled])
 
   function appendHistory(moveSeq: string) {
-    setHistoryId((id) => id + 1)
     setHistory((h) => [...h, {
-      id: historyId + 1,
+      id: h.length + 1,
       moveSeq,
       at: Date.now(),
       stepAtTime: completedRef.current.size,
     }])
+    setHistoryId((id) => id + 1)
   }
 
   function onApplyMove(m: string) {
@@ -895,6 +908,111 @@ export function Solve() {
     setCompleted(new Set())
   }
 
+  // 完整演示：scramble + Kociemba 自动还原（用 functional setState 避免 stale closure）
+  const isPlayingDemoRef = useRef(false)
+  async function playFullDemo() {
+    if (isPlayingDemoRef.current) return
+    isPlayingDemoRef.current = true
+    setIsApplyingExample(true)
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+    // 1. 重置到 solved
+    setMainState(newCube(3))
+    setScrambled(false)
+    setCompleted(new Set())
+    setUndoStack([])
+    setRedoStack([])
+    setHistory([])
+    setHistoryId(0)
+    await sleep(300)
+
+    // 2. 随机 scramble 6 步
+    const allMoves = ['U', 'D', 'R', 'L', 'F', 'B', "U'", "D'", "R'", "L'", "F'", "B'"]
+    const scrambleMoves: string[] = []
+    let last = -1
+    let seed = Date.now() % 100000
+    for (let i = 0; i < 6; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      let m = allMoves[seed % allMoves.length]
+      let face = m.charCodeAt(0)
+      let attempts = 0
+      while (face === last && attempts < 5) {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff
+        m = allMoves[seed % allMoves.length]
+        face = m.charCodeAt(0)
+        attempts++
+      }
+      scrambleMoves.push(m)
+      last = face
+    }
+
+    // 3. 应用 scramble（每步 350ms 加速）
+    for (const m of scrambleMoves) {
+      setMainState((prev) => {
+        const next = cloneCube(prev)
+        applyMoveInPlace(next, m)
+        setUndoStack((s) => [...s, prev])
+        setRedoStack([])
+        setHistory((h) => [...h, { id: h.length + 1, moveSeq: m, at: Date.now(), stepAtTime: 0 }])
+        return next
+      })
+      await sleep(350)
+    }
+    setScrambled(true)
+
+    // 4. 调 Kociemba 算解法
+    let sol: string = ''
+    try {
+      const kociembaMod = await import('kociemba-wasm')
+      await kociembaMod.init()
+      // 用 functional setMainState 的最新值 — 用一个 hack: 直接在 state 内取 facelet
+      // 实际上只能通过 callback: 用 setMainState 的第二个参数或 useState 的 current
+      // 简化：先调用 setMainState 占位让 React 同步更新，然后通过 ref 拿最新 mainState
+      // 更简单：用 mainStateRef 跟踪最新 mainState
+      // 实际上：getStickerString 需要 mainState，我们用 mainStateRef
+      const facelet = getStickerString(mainStateRef.current)  // 拿最新 mainState（ref 同步更新）
+      sol = await kociembaMod.solve(facelet)
+    } catch (e) {
+      console.warn('kociemba solve failed:', e)
+      setIsApplyingExample(false)
+      isPlayingDemoRef.current = false
+      return
+    }
+
+    if (!sol) {
+      setIsApplyingExample(false)
+      isPlayingDemoRef.current = false
+      return
+    }
+
+    // 5. invert F/B (kociemba F = WCA F'，my engine F = WCA F)
+    const moves = sol.trim().split(/\s+/).filter(Boolean).map((m) => {
+      const face = m[0]
+      if (face !== 'F' && face !== 'B') return m
+      if (m.includes('2')) return m
+      if (m.includes("'")) return face
+      return face + "'"
+    })
+
+    // 6. 应用 Kociemba 解法（每步 400ms）
+    for (const m of moves) {
+      setMainState((prev) => {
+        const next = cloneCube(prev)
+        applyMoveInPlace(next, m)
+        setUndoStack((s) => [...s, prev])
+        setRedoStack([])
+        setHistory((h) => [...h, { id: h.length + 1, moveSeq: m, at: Date.now(), stepAtTime: 0 }])
+        return next
+      })
+      await sleep(400)
+    }
+
+    // 7. 标记完成
+    setCompleted(new Set([1, 2, 3, 4, 5, 6, 7]))
+    setIsApplyingExample(false)
+    isPlayingDemoRef.current = false
+  }
+
   function undo() {
     if (undoStack.length === 0) return
     const prev = undoStack[undoStack.length - 1]
@@ -966,6 +1084,7 @@ export function Solve() {
           onUndo={undo}
           onRedo={redo}
           onToggleFaceLabels={() => setShowFaceLabels((v) => !v)}
+          onPlayFullDemo={playFullDemo}
         />
       </div>
       <div id="stage-intermediate"><IntermediateSection /></div>
