@@ -67,7 +67,14 @@ export async function solveViaCubing(input: SixFaceInput): Promise<SolverOutcome
     // 3. 求解
     const solveFn = kociembaModule.solve as (m: string) => Promise<string>
     const solutionStr = await solveFn(facelet)
-    const moves = solutionStr.trim().split(/\s+/).filter(Boolean)
+    const trimmed = solutionStr.trim()
+    if (!trimmed) {
+      return { ok: false, error: 'Kociemba 返回空解法 — 此状态不是合法魔方（颜色组合可能不物理可达）。请检查 6 面输入。' }
+    }
+    const moves = trimmed.split(/\s+/).filter(Boolean)
+    if (moves.length === 0) {
+      return { ok: false, error: '解法包含 0 步 — 状态已经是 solved 或不合法。' }
+    }
 
     return { ok: true, moves, timeMs: performance.now() - startTime }
   } catch (e) {
