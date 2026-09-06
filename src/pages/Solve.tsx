@@ -9,6 +9,7 @@
 // 每步设计：目标 + 关键算法 + 常见错误 + 互动演示（看具体状态）
 
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
 import { TopCubeSection } from '../components/TopCubeSection'
 import { StepGuidance } from '../components/StepGuidance'
@@ -747,6 +748,54 @@ export function Solve() {
   completedRef.current = completed
   const applyingRef = useRef(false)
   applyingRef.current = isApplyingExample
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // 接收 Scan 页传过来的解法，invert F/B（my engine F = WCA F，但 kociemba F = WCA F'）
+  useEffect(() => {
+    if (searchParams.get('apply') !== 'solution') return
+    const stored = sessionStorage.getItem('pendingSolution')
+    if (!stored) return
+    try {
+      const rawMoves: string[] = JSON.parse(stored)
+      sessionStorage.removeItem('pendingSolution')
+      setSearchParams({})
+      if (rawMoves.length === 0) return
+
+      // 翻译：kociemba F ↔ my F'，kociemba F' ↔ my F（kociemba B ↔ my B'）
+      const moves = rawMoves.map((m) => {
+        const face = m[0]
+        if (face !== 'F' && face !== 'B') return m
+        if (m.includes('2')) return m  // 180° 不变
+        if (m.includes("'")) return face  // F' → F
+        return face + "'"  // F → F'
+      })
+
+      // 串行 apply 450ms/步（用 functional setState 避免 stale mainState）
+      setIsApplyingExample(true)
+      let i = 0
+      const tick = () => {
+        if (i >= moves.length) {
+          setIsApplyingExample(false)
+          return
+        }
+        const m = moves[i++]
+        try { parseMoveToken(m) } catch (e) { return }
+        setMainState((prev) => {
+          setUndoStack((s) => [...s, prev])
+          setRedoStack([])
+          const next = cloneCube(prev)
+          applyMoveInPlace(next, m)
+          return next
+        })
+        appendHistory(m)
+        setTimeout(tick, 450)
+      }
+      setTimeout(tick, 100)
+    } catch (e) {
+      console.warn('apply solution failed:', e)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('apply')])
 
   // 自动检测：mainState 变 → 检查 7 步是否新达成
   useEffect(() => {

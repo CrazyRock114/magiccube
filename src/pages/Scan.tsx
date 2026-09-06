@@ -320,11 +320,9 @@ export function Scan() {
                 key={r.level}
                 result={r}
                 onApply={() => {
-                  const formula = r.moves.join(' ')
-                  navigator.clipboard.writeText(formula).then(
-                    () => alert('公式已复制到剪贴板！\n\n' + formula + '\n\n去 /3x3/solve 页粘贴到输入框应用。'),
-                    () => prompt('复制失败，请手动复制：', formula),
-                  )
+                  // 存解法到 sessionStorage + 跳 Solve 页
+                  sessionStorage.setItem('pendingSolution', JSON.stringify(r.moves))
+                  window.location.href = '/3x3/solve?apply=solution'
                 }}
               />
             ))}
