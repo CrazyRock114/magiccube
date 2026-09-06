@@ -286,13 +286,14 @@ interface BeginnerSectionProps {
   onRedo: () => void
   onToggleFaceLabels: () => void
   onPlayFullDemo: () => Promise<void>
+  onPlayStepDemo: (stepNumber: number) => Promise<void>
 }
 
 function BeginnerSection({
   mainState, scrambled, completed, history, canUndo, canRedo,
   isApplyingExample, showFaceLabels,
   onApplyMove, onApplyExample, onScramble, onReset, onUndo, onRedo,
-  onToggleFaceLabels, onPlayFullDemo,
+  onToggleFaceLabels, onPlayFullDemo, onPlayStepDemo,
 }: BeginnerSectionProps) {
   // Step 1 永远 active（不需要等上一步）
   const isUnlocked = (n: number) => n === 1 || completed.has(n - 1)
@@ -402,6 +403,7 @@ function BeginnerSection({
             progress={progress}
             isApplyingExample={isApplyingExample}
             onApplyExample={onApplyExample}
+            onPlayStepDemo={onPlayStepDemo}
           />
         )
       })}
@@ -908,8 +910,56 @@ export function Solve() {
     setCompleted(new Set())
   }
 
-  // 完整演示：scramble + Kociemba 自动还原（用 functional setState 避免 stale closure）
+  // 每步 LBL 演示 sequence（reset 到 solved 后 apply 这些 moves，慢速 600ms/步）
+  // 不严格 LBL-optimal，目标是"视觉上展示该步算法在做什么"
+  const LBL_DEMO_SEQUENCES: Record<number, string[]> = {
+    1: ['F', 'R', 'U', "R'", "U'", "F'"],   // 1 个 Fruruf 变体
+    2: ["R'", "D'", 'R', 'D', "R'", "D'", 'R', 'D', "R'", "D'", 'R', 'D'], // 6x R'D'RD 触发 D 面角块放下来
+    3: ['U', 'R', "U'", "R'", "U'", "F'", 'U', 'F', "U'", "L'", 'U', 'L'],  // 2x right/left insert
+    4: ['F', 'R', 'U', "R'", "U'", "F'"],   // 1x Fruruf
+    5: ['R', 'U', "R'", 'U', 'R', 'U2', "R'"],   // 1x Sune
+    6: ['R', 'U', "R'", "U'", "R'", 'F', 'R2', "U'", "R'", "U'", 'R', 'U', "R'", "F'"],  // 1x T-perm
+    7: ['R', "U'", 'R', 'U', 'R', 'U', 'R', "U'", "R'", "U'", 'R2'],  // 1x U-perm
+  }
   const isPlayingDemoRef = useRef(false)
+
+  // 单步演示：reset 到 solved + apply 该步 sequence + 慢速 600ms/步
+  async function playStepDemo(stepNumber: number) {
+    if (isPlayingDemoRef.current) return
+    const moves = LBL_DEMO_SEQUENCES[stepNumber]
+    if (!moves) return
+    isPlayingDemoRef.current = true
+    setIsApplyingExample(true)
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+    // 1. 重置到 solved
+    setMainState(newCube(3))
+    setScrambled(false)
+    setCompleted(new Set())
+    setUndoStack([])
+    setRedoStack([])
+    setHistory([])
+    setHistoryId(0)
+    await sleep(300)
+
+    // 2. 慢速 apply 演示 sequence (600ms/步)
+    for (const m of moves) {
+      setMainState((prev) => {
+        const next = cloneCube(prev)
+        applyMoveInPlace(next, m)
+        setUndoStack((s) => [...s, prev])
+        setRedoStack([])
+        setHistory((h) => [...h, { id: h.length + 1, moveSeq: m, at: Date.now(), stepAtTime: 0 }])
+        return next
+      })
+      await sleep(600)
+    }
+
+    setIsApplyingExample(false)
+    isPlayingDemoRef.current = false
+  }
+
+  // 完整演示：scramble + Kociemba 自动还原（用 functional setState 避免 stale closure）
   async function playFullDemo() {
     if (isPlayingDemoRef.current) return
     isPlayingDemoRef.current = true
@@ -1085,6 +1135,7 @@ export function Solve() {
           onRedo={redo}
           onToggleFaceLabels={() => setShowFaceLabels((v) => !v)}
           onPlayFullDemo={playFullDemo}
+          onPlayStepDemo={playStepDemo}
         />
       </div>
       <div id="stage-intermediate"><IntermediateSection /></div>

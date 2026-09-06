@@ -23,11 +23,13 @@ export interface StepGuidanceProps {
   isApplyingExample?: boolean
   // 应用示例公式按钮回调
   onApplyExample?: (notation: string) => void
+  // 演示这一步按钮回调（reset 主魔方 + apply 该步 sequence 慢速）
+  onPlayStepDemo?: (stepNumber: number) => void
 }
 
 export function StepGuidance({
   stepNumber, title, goal, hint, algorithm, tips, warnings,
-  status, progress, isApplyingExample, onApplyExample,
+  status, progress, isApplyingExample, onApplyExample, onPlayStepDemo,
 }: StepGuidanceProps) {
   return (
     <div className={`card mb-4 transition-all ${
@@ -87,6 +89,16 @@ export function StepGuidance({
                   title="把示例公式应用到顶部主魔方（带动画）"
                 >
                   {isApplyingExample ? '⏵ 播放中...' : '▶ 应用示例公式到主魔方'}
+                </button>
+              )}
+              {onPlayStepDemo && status === 'active' && (
+                <button
+                  onClick={() => onPlayStepDemo(stepNumber)}
+                  disabled={isApplyingExample}
+                  className="mt-2 ml-2 px-3 py-1.5 rounded bg-green-500 text-white font-semibold text-sm hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
+                  title="重置主魔方到 solved + 慢速演示该 step 的算法（600ms/步）"
+                >
+                  {isApplyingExample ? '⏵ 演示中...' : `▶ 演示 Step ${stepNumber}`}
                 </button>
               )}
             </div>
