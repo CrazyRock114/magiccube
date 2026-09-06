@@ -316,10 +316,11 @@ export function Scan() {
                 key={r.level}
                 result={r}
                 onApply={() => {
-                  // 存解法 + 用户输入的 6 面 (让 Solve 页能重建 CubeState)
-                  sessionStorage.setItem('pendingSolution', JSON.stringify(r.moves))
-                  sessionStorage.setItem('pendingInput', JSON.stringify(input))
-                  window.location.href = '/3x3/solve?apply=solution'
+                  const formula = r.moves.join(' ')
+                  navigator.clipboard.writeText(formula).then(
+                    () => alert('公式已复制到剪贴板！\n\n' + formula + '\n\n去 /3x3/solve 页粘贴到输入框应用。'),
+                    () => prompt('复制失败，请手动复制：', formula),
+                  )
                 }}
               />
             ))}

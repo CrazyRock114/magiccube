@@ -9,7 +9,6 @@
 // 每步设计：目标 + 关键算法 + 常见错误 + 互动演示（看具体状态）
 
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
 import { Cube3D, MiniCube2D } from '../components/Cube3D'
 import { TopCubeSection } from '../components/TopCubeSection'
 import { StepGuidance } from '../components/StepGuidance'
@@ -748,80 +747,6 @@ export function Solve() {
   completedRef.current = completed
   const applyingRef = useRef(false)
   applyingRef.current = isApplyingExample
-  const [searchParams, setSearchParams] = useSearchParams()
-
-  // 接收 Scan 页传过来的解法 (?apply=solution + sessionStorage.pendingSolution + pendingInput)
-  useEffect(() => {
-    if (searchParams.get('apply') !== 'solution') return
-    const storedMoves = sessionStorage.getItem('pendingSolution')
-    const storedInput = sessionStorage.getItem('pendingInput')
-    if (!storedMoves) return
-
-    const doApply = async () => {
-      try {
-        const moves: string[] = JSON.parse(storedMoves)
-        sessionStorage.removeItem('pendingSolution')
-        sessionStorage.removeItem('pendingInput')
-        setSearchParams({})
-        if (moves.length === 0) return
-
-        // 1) 重建用户输入的 CubeState (用 6 面颜色)
-        let startState: CubeState
-        if (storedInput) {
-          try {
-            const input = JSON.parse(storedInput)
-            const { sixFaceToState, validateSixFace } = await import('../cube/facelet-to-state')
-            const v = validateSixFace(input)
-            if (v.ok) {
-              startState = sixFaceToState(input)
-            } else {
-              console.warn('invalid 6 face input:', v.error)
-              startState = newCube(3)
-            }
-          } catch (e) {
-            console.warn('parse pendingInput failed:', e)
-            startState = newCube(3)
-          }
-        } else {
-          startState = newCube(3)
-        }
-
-        // 2) 立即设置主魔方 = 用户输入的状态
-        setMainState(startState)
-        setScrambled(true)
-        setCompleted(new Set())
-        setUndoStack([])
-        setRedoStack([])
-        setHistoryId((id) => id + 1)
-        const newHistoryId = historyId + 1
-        setHistory([{ id: newHistoryId, moveSeq: '[Scan 解法 ' + moves.length + ' 步]', at: Date.now(), stepAtTime: 0 }])
-
-        // 3) 串行 apply 450ms/步
-        setIsApplyingExample(true)
-        let i = 0
-        const tick = () => {
-          if (i >= moves.length) {
-            setIsApplyingExample(false)
-            return
-          }
-          const m = moves[i++]
-          try { parseMoveToken(m) } catch (e) { return }
-          setUndoStack((s) => [...s, mainState])
-          setRedoStack([])
-          const next = cloneCube(mainState)
-          applyMoveInPlace(next, m)
-          setMainState(next)
-          appendHistory(m)
-          setTimeout(tick, 450)
-        }
-        setTimeout(tick, 100)
-      } catch (e) {
-        console.warn('apply solution failed:', e)
-      }
-    }
-    doApply()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams.get('apply')])
 
   // 自动检测：mainState 变 → 检查 7 步是否新达成
   useEffect(() => {
