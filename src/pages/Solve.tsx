@@ -765,50 +765,84 @@ export function Solve() {
   mainStateRef.current = mainState
   const [searchParams, setSearchParams] = useSearchParams()
 
-  // 接收 Scan 页传过来的解法，invert F/B（my engine F = WCA F，但 kociemba F = WCA F'）
+  // 接收 Scan 页传过来的解法 + 6 面 input，invert F/B（my engine F = WCA F，但 kociemba F = WCA F'）
   useEffect(() => {
     if (searchParams.get('apply') !== 'solution') return
-    const stored = sessionStorage.getItem('pendingSolution')
-    if (!stored) return
-    try {
-      const rawMoves: string[] = JSON.parse(stored)
-      sessionStorage.removeItem('pendingSolution')
-      setSearchParams({})
-      if (rawMoves.length === 0) return
+    const storedMoves = sessionStorage.getItem('pendingSolution')
+    const storedInput = sessionStorage.getItem('pendingInput')
+    if (!storedMoves) return
 
-      // 翻译：kociemba F ↔ my F'，kociemba F' ↔ my F（kociemba B ↔ my B'）
-      const moves = rawMoves.map((m) => {
-        const face = m[0]
-        if (face !== 'F' && face !== 'B') return m
-        if (m.includes('2')) return m  // 180° 不变
-        if (m.includes("'")) return face  // F' → F
-        return face + "'"  // F → F'
-      })
+    const doApply = async () => {
+      try {
+        const rawMoves: string[] = JSON.parse(storedMoves)
+        sessionStorage.removeItem('pendingSolution')
+        if (storedInput) sessionStorage.removeItem('pendingInput')
+        setSearchParams({})
+        if (rawMoves.length === 0) return
 
-      // 串行 apply 450ms/步（用 functional setState 避免 stale mainState）
-      setIsApplyingExample(true)
-      let i = 0
-      const tick = () => {
-        if (i >= moves.length) {
-          setIsApplyingExample(false)
-          return
+        // 1) 用 6 面 input 重建 CubeState（设为主魔方起点）
+        let startState: CubeState = mainStateRef.current
+        if (storedInput) {
+          try {
+            const input = JSON.parse(storedInput)
+            const { sixFaceToState, validateSixFace } = await import('../cube/facelet-to-state')
+            const v = validateSixFace(input)
+            if (v.ok) {
+              startState = sixFaceToState(input)
+            } else {
+              console.warn('invalid 6 face input:', v.error)
+            }
+          } catch (e) {
+            console.warn('parse pendingInput failed:', e)
+          }
         }
-        const m = moves[i++]
-        try { parseMoveToken(m) } catch (e) { return }
-        setMainState((prev) => {
-          setUndoStack((s) => [...s, prev])
-          setRedoStack([])
-          const next = cloneCube(prev)
-          applyMoveInPlace(next, m)
-          return next
+
+        // 翻译：kociemba F ↔ my F'，kociemba F' ↔ my F（kociemba B ↔ my B'）
+        const moves = rawMoves.map((m) => {
+          const face = m[0]
+          if (face !== 'F' && face !== 'B') return m
+          if (m.includes('2')) return m  // 180° 不变
+          if (m.includes("'")) return face  // F' → F
+          return face + "'"  // F → F'
         })
-        appendHistory(m)
-        setTimeout(tick, 450)
+
+        // 2) 设主魔方 = 用户输入的状态
+        setMainState(startState)
+        setScrambled(true)
+        setCompleted(new Set())
+        setUndoStack([])
+        setRedoStack([])
+        setHistory([])
+        setHistoryId(0)
+        mainStateRef.current = startState  // 同步 ref 避免闭包 stale
+        await new Promise((r) => setTimeout(r, 100))
+
+        // 3) 串行 apply 450ms/步
+        setIsApplyingExample(true)
+        let i = 0
+        const tick = () => {
+          if (i >= moves.length) {
+            setIsApplyingExample(false)
+            return
+          }
+          const m = moves[i++]
+          try { parseMoveToken(m) } catch (e) { return }
+          setMainState((prev) => {
+            setUndoStack((s) => [...s, prev])
+            setRedoStack([])
+            const next = cloneCube(prev)
+            applyMoveInPlace(next, m)
+            return next
+          })
+          appendHistory(m)
+          setTimeout(tick, 450)
+        }
+        setTimeout(tick, 100)
+      } catch (e) {
+        console.warn('apply solution failed:', e)
       }
-      setTimeout(tick, 100)
-    } catch (e) {
-      console.warn('apply solution failed:', e)
     }
+    doApply()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams.get('apply')])
 

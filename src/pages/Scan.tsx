@@ -316,8 +316,9 @@ export function Scan() {
                 key={r.level}
                 result={r}
                 onApply={() => {
-                  // 存解法到 sessionStorage + 跳 Solve 页
+                  // 存解法 + 用户输入的 6 面 (让 Solve 页能重建 CubeState)
                   sessionStorage.setItem('pendingSolution', JSON.stringify(r.moves))
+                  sessionStorage.setItem('pendingInput', JSON.stringify(input))
                   window.location.href = '/3x3/solve?apply=solution'
                 }}
               />
