@@ -166,28 +166,23 @@ export function Scan() {
     // LBL: 7 段（约等分）— Cross / F2L / 2-Look OLL / 2-Look PLL
     // CFOP: 4 段（同上）— Cross / F2L / OLL / PLL
     // Master: 1 段（整体）
-    const lblStages = [
-      { name: 'Step 1 底层十字 (LBL)', stepCount: Math.max(1, Math.floor(totalSteps * 0.1)) },
-      { name: 'Step 2-3 底层 + 中层', stepCount: Math.max(1, Math.floor(totalSteps * 0.4)) },
-      { name: 'Step 4-5 顶面 + 定向', stepCount: Math.max(1, Math.floor(totalSteps * 0.2)) },
-      { name: 'Step 6-7 顶层定位', stepCount: Math.max(1, totalSteps - Math.floor(totalSteps * 0.1) - Math.floor(totalSteps * 0.4) - Math.floor(totalSteps * 0.2)) },
-    ]
-    const cfopStages = [
-      { name: 'Cross 底层十字', stepCount: Math.max(1, Math.floor(totalSteps * 0.15)) },
-      { name: 'F2L 前两层', stepCount: Math.max(1, Math.floor(totalSteps * 0.45)) },
-      { name: '2-Look OLL 顶面定向', stepCount: Math.max(1, Math.floor(totalSteps * 0.2)) },
-      { name: '2-Look PLL 顶层定位', stepCount: Math.max(1, totalSteps - Math.floor(totalSteps * 0.15) - Math.floor(totalSteps * 0.45) - Math.floor(totalSteps * 0.2)) },
-    ]
+    // Beginner LBL: 7 阶段分组（heuristic 按比例切分 Kociemba moves）
+    const { solveLBLFromMoves } = await import('../cube/solver-lbl')
+    const { solveCFOPFromMoves } = await import('../cube/solver-cfop')
+    const lblResult = solveLBLFromMoves(moves)
+    const lblStages = lblResult.stages
+    const cfopResult = solveCFOPFromMoves(moves)
+    const cfopStages = cfopResult.stages
 
     setResults([
       {
         name: '初学者 (LBL)',
         level: 'beginner',
-        desc: '7 阶段分步套用 LBL 公式 — 教学上按 7 段讲解，每段独立公式。',
+        desc: '7 阶段分步 — Kociemba 解法按 LBL 教学阶段（Cross / F2L / OLL / PLL）分组。',
         moves,
         stages: lblStages,
         totalSteps,
-        success: true,
+        success: lblResult.success,
         timeMs,
         estimatedTimeSec: Math.ceil(totalSteps * 1.5),
       },

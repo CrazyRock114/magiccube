@@ -143,15 +143,15 @@ function computeTurn(move: string): { totalTurns: 1 | 2 | 3; angleQuat: Quat } {
     case 'U': case 'D': axis = 'y'; break
     case 'F': case 'B': axis = 'z'; break
   }
-  // 对于 R/U/F（normal 在 +axis 方向），CW = 1 quarter
-  // 对于 L/D/B（normal 在 -axis 方向），CW = -1 quarter
-  // 我们用 rotateGrid90 的"绕 +axis 顺时针"作为基本动作。
-  // R: 1 quarter CW around +X
-  // L: 1 quarter CW around +X axis 但 L 面是 -X，所以 L = 3 quarter CW around +X = -1 quarter
-  // 同理 D/B。
+  // R/U/F（normal 在 +axis 方向），CW = 1 quarter
+  // L/D/B（normal 在 -axis 方向），CW = -1 quarter (= 3 quarter CCW)
+  // 对齐 kociemba-wasm 约定：F/B 走 CCW from +Z (即 WCA F'/B' 方向)
   const negate = info.face === 'L' || info.face === 'D' || info.face === 'B'
+  const flipFB = info.face === 'F' || info.face === 'B'
   const totalTurns = (negate ? (4 - turns) : turns) as 1 | 2 | 3
-  const angle = -Math.PI / 2 * totalTurns
+  // F/B 角度取反（让 orientation 与 kociemba 一致 = CCW from +Z）
+  const sign = (flipFB ? 1 : -1)
+  const angle = sign * Math.PI / 2 * totalTurns
   return { totalTurns, angleQuat: quatFromAxisAngle(axis, angle) }
 }
 
