@@ -10,10 +10,9 @@
 // Slot 顺序（cubing.js 0.63）：
 // CORNER: 0=URF, 1=URB, 2=ULB, 3=UFL, 4=DFR, 5=DFL, 6=DBL, 7=DRB
 // EDGE:   0=UF,  1=UR,   2=UB,   3=UL,   4=DF,   5=DR,   6=DB,   7=DL, 8=FR, 9=FL, 10=BR, 11=BL
+//
+// 注意：cubing.js 内部用到 `document` / `window`，必须 dynamic import 避免 SSR/build 阶段报错
 
-import { cube3x3x3 } from 'cubing/puzzles'
-import { KPattern } from 'cubing/kpuzzle'
-import { experimentalSolve3x3x3IgnoringCenters } from 'cubing/search'
 import type { Face } from './state'
 import type { FaceColors, SixFaceInput } from './facelet'
 
@@ -228,6 +227,11 @@ export async function solveViaCubing(input: SixFaceInput): Promise<SolverOutcome
       edgePieces[slot] = pieceId
       edgeOrientationArr[slot] = edgeOrientation(pieceId, stickers)
     }
+
+    // Dynamic import cubing.js modules (避免 build/SSR 阶段触发 document 引用)
+    const { cube3x3x3 } = await import('cubing/puzzles')
+    const { KPattern } = await import('cubing/kpuzzle')
+    const { experimentalSolve3x3x3IgnoringCenters } = await import('cubing/search')
 
     // Construct KPatternData
     const kp = await cube3x3x3.kpuzzle()
