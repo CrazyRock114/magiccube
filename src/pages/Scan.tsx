@@ -226,6 +226,10 @@ export function Scan() {
           扫描你的魔方（手动 6 面点选 或 摄像头拍照）→ 算出 3 种解法：
           初学者 LBL、进阶者 2-Look CFOP、大师 Optimal。
         </p>
+        <div className="text-xs text-yellow-400/80 bg-yellow-500/10 border border-yellow-500/30 rounded px-3 py-2 mt-2">
+          ⚠️ <b>本系统约定</b>：F 和 B 转动方向是 <b>WCA F' / B'</b>（90° CCW）。要按 WCA 标准 F / B 转，请在公式里用 F' / B'。
+          3D 主魔方渲染时 F / B 会显示为 90° CCW，这是预期的。
+        </div>
       </header>
 
       <section className="card">
