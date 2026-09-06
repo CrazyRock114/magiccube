@@ -5,6 +5,7 @@ import { Cube3x3 } from './pages/Cube3x3'
 import { Notation } from './pages/Notation'
 import { AlgorithmViz } from './pages/AlgorithmViz'
 import { Solve } from './pages/Solve'
+import { Scan } from './pages/Scan'
 import { GraphTheory } from './pages/GraphTheory'
 import { Cube2x2 } from './pages/Cube2x2'
 import { Cube4x4 } from './pages/Cube4x4'
@@ -15,6 +16,7 @@ const NAV = [
   { to: '/3x3', label: '三阶', desc: '标准 3×3 教学' },
   { to: '/3x3/notation', label: '记号', desc: 'Singmaster 记号系统' },
   { to: '/3x3/solve', label: '还原', desc: '完整还原教程（4 阶段）' },
+  { to: '/3x3/scan', label: '扫描', desc: '3 种解法计算（初学者/进阶/大师）' },
   { to: '/3x3/algos', label: '公式', desc: 'CFOP 可视化拆解' },
   { to: '/3x3/graph', label: '图论', desc: 'Cayley 图与群论视角' },
   { to: '/2x2', label: '二阶', desc: 'Pocket Cube' },
@@ -99,6 +101,7 @@ export default function App() {
           <Route path="/3x3" element={<Cube3x3 />} />
           <Route path="/3x3/notation" element={<Notation />} />
           <Route path="/3x3/solve" element={<Solve />} />
+          <Route path="/3x3/scan" element={<Scan />} />
           <Route path="/3x3/algos" element={<AlgorithmViz />} />
           <Route path="/3x3/graph" element={<GraphTheory />} />
           <Route path="/2x2" element={<Cube2x2 />} />

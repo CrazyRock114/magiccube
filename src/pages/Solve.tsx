@@ -48,7 +48,7 @@ function formatTime(ts: number, base: number): string {
 
 // ==================== 内容 section 组件 ====================
 
-function SectionTitle({ num, title, subtitle }: { num: string; title: string; subtitle?: string }) {
+export function SectionTitle({ num, title, subtitle }: { num: string; title: string; subtitle?: string }) {
   return (
     <header className="mb-6">
       <div className="flex items-baseline gap-3 mb-2">
