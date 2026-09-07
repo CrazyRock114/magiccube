@@ -181,7 +181,7 @@ export function Scan() {
       import('../cube/solver-cfop'),
     ])
 
-    const lblResult = solveLBL(inputState, kociembaMoves)
+    const lblResult = solveLBL(inputState)
     const cfopResult = solveCFOP(inputState, kociembaMoves)
 
     setResults([
