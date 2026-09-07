@@ -149,64 +149,77 @@ export function Scan() {
     setError(null)
     setResults(null)
 
-    // 调 cubing.js Kociemba 算 1 次
-    const cubingResult = await solveViaCubing(input)
-    if (!cubingResult.ok) {
-      const msg = 'error' in cubingResult ? cubingResult.error : '未知错误'
-      setError(`Kociemba 求解失败：${msg}。可能是输入的 6 面不是合法魔方状态。`)
+    // 1. 把 6 面 input 重建为 CubeState（用作 LBL/CFOP solver 的输入）
+    const { sixFaceToState } = await import('../cube/facelet-to-state')
+    const inputState = sixFaceToState(input)
+    const { isSolved } = await import('../cube/state')
+    if (isSolved(inputState)) {
+      setError('当前魔方已经是 solved 状态，无需求解。')
       setComputing(false)
       return
     }
 
-    const moves = cubingResult.moves
-    const totalSteps = moves.length
-    const timeMs = cubingResult.timeMs
+    // 2. 3 种 solver 并行跑（不同算法 → 不同步数）
+    // - Beginner (LBL): 7 阶段 trigger 重复（手摆 + R'D'RD + insert + Fruruf + Sune + T/A + U/H）
+    // - Intermediate (CFOP): 4 阶段流水线（Cross + F2L + 2-Look OLL + 2-Look PLL）
+    // - Master (Optimal): Kociemba WASM two-phase（最少步数 ~20）
 
-    // 把 moves 切成不同 segments
-    // LBL: 7 段（约等分）— Cross / F2L / 2-Look OLL / 2-Look PLL
-    // CFOP: 4 段（同上）— Cross / F2L / OLL / PLL
-    // Master: 1 段（整体）
-    // Beginner LBL: 7 阶段分组（heuristic 按比例切分 Kociemba moves）
-    const { solveLBLFromMoves } = await import('../cube/solver-lbl')
-    const { solveCFOPFromMoves } = await import('../cube/solver-cfop')
-    const lblResult = solveLBLFromMoves(moves)
-    const lblStages = lblResult.stages
-    const cfopResult = solveCFOPFromMoves(moves)
-    const cfopStages = cfopResult.stages
+    const [{ solveLBL }, { solveCFOP }] = await Promise.all([
+      import('../cube/solver-lbl'),
+      import('../cube/solver-cfop'),
+    ])
 
+    const lblResult = solveLBL(inputState)
+    const cfopResult = solveCFOP(inputState)
+
+    // Optimal: 用 kociemba-wasm
+    let optimalMoves: string[] = []
+    let optimalTime = 0
+    try {
+      const startOpt = performance.now()
+      const cubingResult = await solveViaCubing(input)
+      if (cubingResult.ok) {
+        optimalMoves = cubingResult.moves
+        optimalTime = cubingResult.timeMs
+      }
+    } catch (e) {
+      console.warn('kociemba failed:', e)
+    }
+
+    // 3. 输出 3 种解法
     setResults([
       {
         name: '初学者 (LBL)',
         level: 'beginner',
-        desc: '7 阶段分步 — Kociemba 解法按 LBL 教学阶段（Cross / F2L / OLL / PLL）分组。',
-        moves,
-        stages: lblStages,
-        totalSteps,
+        desc: '7 阶段 LBL 触发器重复（手摆 + R\'D\'RD + insert + Fruruf + Sune + T/A perm + U/H perm）。步数最多，逻辑最简单。',
+        moves: lblResult.moves,
+        stages: lblResult.stages,
+        totalSteps: lblResult.totalSteps,
         success: lblResult.success,
-        timeMs,
-        estimatedTimeSec: Math.ceil(totalSteps * 1.5),
+        timeMs: lblResult.timeMs,
+        estimatedTimeSec: Math.ceil(lblResult.totalSteps * 1.5),
       },
       {
         name: '进阶者 (2-Look CFOP)',
         level: 'intermediate',
-        desc: '4 段流水线（Cross / F2L / 2-Look OLL / 2-Look PLL）— 进阶者的工作流。',
-        moves,
-        stages: cfopStages,
-        totalSteps,
-        success: true,
-        timeMs,
-        estimatedTimeSec: Math.ceil(totalSteps * 0.8),
+        desc: '4 段流水线（Cross + F2L + 2-Look OLL + 2-Look PLL）。比 LBL 步数少，比 Kociemba 多。',
+        moves: cfopResult.moves,
+        stages: cfopResult.stages,
+        totalSteps: cfopResult.totalSteps,
+        success: cfopResult.success,
+        timeMs: cfopResult.timeMs,
+        estimatedTimeSec: Math.ceil(cfopResult.totalSteps * 1.0),
       },
       {
         name: '大师 (Optimal)',
         level: 'master',
-        desc: 'Kociemba 两阶段算法求出的最优解 — 不分阶段，God\'s Number = 20。',
-        moves,
-        stages: [{ name: 'Optimal (整体)', stepCount: totalSteps }],
-        totalSteps,
-        success: true,
-        timeMs,
-        estimatedTimeSec: Math.ceil(totalSteps * 0.5),
+        desc: 'Kociemba 两阶段算法求出的最优解 — 不分阶段，God\'s Number = 20。最少步数。',
+        moves: optimalMoves,
+        stages: optimalMoves.length > 0 ? [{ name: 'Optimal (整体)', stepCount: optimalMoves.length }] : [],
+        totalSteps: optimalMoves.length,
+        success: optimalMoves.length > 0,
+        timeMs: optimalTime,
+        estimatedTimeSec: Math.ceil(optimalMoves.length * 0.5),
       },
     ])
     setComputing(false)
