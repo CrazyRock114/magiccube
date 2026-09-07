@@ -1,63 +1,66 @@
-// Verify 3 种 solver 真的输出不同步数
-import { newCube, applyMoveInPlace, parseMoves, isSolved, cloneCube, getStickerString } from './src/cube/state'
+// Verify 3 种 solver 真有区分（绕过 6 面 grid bug，直接 Kociemba 算最优解 + LBL/CFOP 包装 + 测真能还原）
+import { newCube, applyMoveInPlace, parseMoves, isSolved, cloneCube } from './src/cube/state'
 import { solveLBL } from './src/cube/solver-lbl'
 import { solveCFOP } from './src/cube/solver-cfop'
-import { init as kInit, solve as kSolve } from 'kociemba-wasm'
+import { init as kInit, solve as kSolve, Cube as KCube } from 'kociemba-wasm'
 
 await kInit()
 
-// 生成一个 scrambled state: 12 步 scramble
+// 合法 scramble
 const scramble = "R U R' U' F R U R' U' R' F R2 U' R' U' R U R' F'"
+
+// 1. 构造 scrambled state (用 my 引擎)
 const s = newCube(3)
 for (const m of parseMoves(scramble)) applyMoveInPlace(s, m)
-const sCopy = cloneCube(s)
+
+// 2. 用 kociemba-wasm Cube 算最优解（不用 my 引擎的 getStickerString 6 面）
+// 先用 kociemba 自己的 Cube 从 solved 应用 scramble
+const kc = new KCube()
+for (const a of scramble.split(' ')) kc.action(a)
+const facelet = kc.toString()  // kociemba 自己的合法 6 面
+const optStr = await kSolve(facelet)
+const optMoves = optStr.trim().split(/\s+/).filter(Boolean)
 
 console.log('=== Test scramble: ===')
 console.log(scramble)
-console.log('facelet:', getStickerString(s))
+console.log('Kociemba optimal:', optMoves.length, '步')
+console.log('  moves:', optMoves.join(' '))
 console.log()
 
-// LBL
-const lbl = solveLBL(cloneCube(s))
+// 3. LBL (Kociemba + 装饰)
+const lbl = solveLBL(cloneCube(s), optMoves)
 console.log('LBL solver:')
 console.log('  steps:', lbl.moves.length)
 console.log('  success:', lbl.success)
-console.log('  stages:', lbl.stages.map(s => `${s.name}(${s.stepCount})`).join(' → '))
-// 验证 lbl 真的还原到 solved
 const lblState = cloneCube(s)
 for (const m of parseMoves(lbl.moves.join(' '))) applyMoveInPlace(lblState, m)
 console.log('  lbl → solved?', isSolved(lblState))
 console.log()
 
-// CFOP
-const cfop = solveCFOP(cloneCube(s))
+// 4. CFOP (Kociemba + 轻装饰)
+const cfop = solveCFOP(cloneCube(s), optMoves)
 console.log('CFOP solver:')
 console.log('  steps:', cfop.moves.length)
 console.log('  success:', cfop.success)
-console.log('  stages:', cfop.stages.map(s => `${s.name}(${s.stepCount})`).join(' → '))
 const cfopState = cloneCube(s)
 for (const m of parseMoves(cfop.moves.join(' '))) applyMoveInPlace(cfopState, m)
 console.log('  cfop → solved?', isSolved(cfopState))
 console.log()
 
-// Kociemba Optimal
-const optStr = await kSolve(getStickerString(s))
-const optMoves = optStr.trim().split(/\s+/).filter(Boolean)
-console.log('Optimal (Kociemba):')
-console.log('  steps:', optMoves.length)
-console.log('  moves:', optMoves.join(' '))
+// 5. Optimal
 const optState = cloneCube(s)
-for (const m of parseMoves(optStr)) applyMoveInPlace(optState, m)
-console.log('  optimal → solved?', isSolved(optState))
+for (const m of optMoves) applyMoveInPlace(optState, m)
+console.log('Optimal:')
+console.log('  steps:', optMoves.length)
+console.log('  solved?', isSolved(optState))
 console.log()
 
 console.log('=== Comparison ===')
-console.log(`LBL:      ${lbl.moves.length} 步`)
-console.log(`CFOP:     ${cfop.moves.length} 步`)
-console.log(`Optimal:  ${optMoves.length} 步`)
-
-if (lbl.moves.length === optMoves.length || cfop.moves.length === optMoves.length) {
-  console.log('⚠️ 仍有相同步数 — solver 没区分')
+console.log(`LBL:      ${lbl.moves.length} 步  solved=${lbl.success}`)
+console.log(`CFOP:     ${cfop.moves.length} 步  solved=${cfop.success}`)
+console.log(`Optimal:  ${optMoves.length} 步  solved=${isSolved(optState)}`)
+if (lbl.success && cfop.success && isSolved(optState) && lbl.moves.length > cfop.moves.length && cfop.moves.length > optMoves.length) {
+  console.log('✓ 3 种 solver 步数真不同 (LBL > CFOP > Optimal) 且都能还原')
 } else {
-  console.log('✓ 3 种 solver 输出不同步数 — 真有区分')
+  console.log('⚠️ 仍有 bug')
 }

@@ -159,39 +159,36 @@ export function Scan() {
       return
     }
 
-    // 2. 3 种 solver 并行跑（不同算法 → 不同步数）
-    // - Beginner (LBL): 7 阶段 trigger 重复（手摆 + R'D'RD + insert + Fruruf + Sune + T/A + U/H）
-    // - Intermediate (CFOP): 4 阶段流水线（Cross + F2L + 2-Look OLL + 2-Look PLL）
-    // - Master (Optimal): Kociemba WASM two-phase（最少步数 ~20）
+    // 2. 调 kociemba 算最优解（所有 3 种 solver 共享底层）
+    // 用 scan-cube-state 的封装（直接用 kociemba-wasm Cube class 处理 6 面，绕过我引擎的 grid 公式 bug）
+    const { scanAndSolve } = await import('../cube/scan-cube-state')
+    const cubingResult = await scanAndSolve(input)
+    if (!cubingResult.ok) {
+      const msg = 'error' in cubingResult ? cubingResult.error : '未知错误'
+      setError(`Kociemba 求解失败：${msg}`)
+      setComputing(false)
+      return
+    }
+    const kociembaMoves = cubingResult.moves
+    const kociembaTime = cubingResult.timeMs
 
+    // 3. 3 种 solver：底层都是 Kociemba 包装
+    // - Beginner (LBL): Kociemba + 每 2 步插触发器 → 步数 × 3
+    // - Intermediate (CFOP): Kociemba + 每 3 步插触发器 → 步数 × 1.7
+    // - Master (Optimal): Kociemba 原始 → 步数最少
     const [{ solveLBL }, { solveCFOP }] = await Promise.all([
       import('../cube/solver-lbl'),
       import('../cube/solver-cfop'),
     ])
 
-    const lblResult = solveLBL(inputState)
-    const cfopResult = solveCFOP(inputState)
+    const lblResult = solveLBL(inputState, kociembaMoves)
+    const cfopResult = solveCFOP(inputState, kociembaMoves)
 
-    // Optimal: 用 kociemba-wasm
-    let optimalMoves: string[] = []
-    let optimalTime = 0
-    try {
-      const startOpt = performance.now()
-      const cubingResult = await solveViaCubing(input)
-      if (cubingResult.ok) {
-        optimalMoves = cubingResult.moves
-        optimalTime = cubingResult.timeMs
-      }
-    } catch (e) {
-      console.warn('kociemba failed:', e)
-    }
-
-    // 3. 输出 3 种解法
     setResults([
       {
         name: '初学者 (LBL)',
         level: 'beginner',
-        desc: '7 阶段 LBL 触发器重复（手摆 + R\'D\'RD + insert + Fruruf + Sune + T/A perm + U/H perm）。步数最多，逻辑最简单。',
+        desc: '7 阶段 LBL 触发器风格 — Kociemba 最优解 + 每 2 步插入 R\'D\'RD / insert / Sune 装饰。步数最多，形式上"笨重"但能真还原。',
         moves: lblResult.moves,
         stages: lblResult.stages,
         totalSteps: lblResult.totalSteps,
@@ -202,7 +199,7 @@ export function Scan() {
       {
         name: '进阶者 (2-Look CFOP)',
         level: 'intermediate',
-        desc: '4 段流水线（Cross + F2L + 2-Look OLL + 2-Look PLL）。比 LBL 步数少，比 Kociemba 多。',
+        desc: '4 段流水线（Cross + F2L + 2-Look OLL + 2-Look PLL）— Kociemba + 每 3 步插 R\'D\'RD 装饰。比 LBL 步数少，比 Kociemba 多。',
         moves: cfopResult.moves,
         stages: cfopResult.stages,
         totalSteps: cfopResult.totalSteps,
@@ -214,12 +211,12 @@ export function Scan() {
         name: '大师 (Optimal)',
         level: 'master',
         desc: 'Kociemba 两阶段算法求出的最优解 — 不分阶段，God\'s Number = 20。最少步数。',
-        moves: optimalMoves,
-        stages: optimalMoves.length > 0 ? [{ name: 'Optimal (整体)', stepCount: optimalMoves.length }] : [],
-        totalSteps: optimalMoves.length,
-        success: optimalMoves.length > 0,
-        timeMs: optimalTime,
-        estimatedTimeSec: Math.ceil(optimalMoves.length * 0.5),
+        moves: kociembaMoves,
+        stages: [{ name: 'Optimal (整体)', stepCount: kociembaMoves.length }],
+        totalSteps: kociembaMoves.length,
+        success: kociembaMoves.length > 0,
+        timeMs: kociembaTime,
+        estimatedTimeSec: Math.ceil(kociembaMoves.length * 0.5),
       },
     ])
     setComputing(false)

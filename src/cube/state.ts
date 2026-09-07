@@ -243,12 +243,13 @@ interface FaceGrid {
 }
 
 const FACE_GRIDS: Record<Face, FaceGrid> = {
-  U: { face: 'U', normalAxis: 'y', normalSign:  1, position: (x, _y, z, h) => [x + h, h - z] },
-  D: { face: 'D', normalAxis: 'y', normalSign: -1, position: (x, _y, z, h) => [x + h, z + h] },
+  // 改成跟 kociemba-wasm 6 面 grid 一致（这样 Kociemba 接受我们的 getStickerString 输出）
+  U: { face: 'U', normalAxis: 'y', normalSign:  1, position: (x, _y, z, h) => [h - x, h - z] },
+  D: { face: 'D', normalAxis: 'y', normalSign: -1, position: (x, _y, z, h) => [h - x, z + h] },
   R: { face: 'R', normalAxis: 'x', normalSign:  1, position: (_x, y, z, h) => [h - z, h - y] },
   L: { face: 'L', normalAxis: 'x', normalSign: -1, position: (_x, y, z, h) => [z + h, h - y] },
-  F: { face: 'F', normalAxis: 'z', normalSign:  1, position: (x, y, _z, h) => [x + h, h - y] },
-  B: { face: 'B', normalAxis: 'z', normalSign: -1, position: (x, y, _z, h) => [h - x, h - y] },
+  F: { face: 'F', normalAxis: 'z', normalSign:  1, position: (x, y, _z, h) => [h - x, h - y] },
+  B: { face: 'B', normalAxis: 'z', normalSign: -1, position: (x, y, _z, h) => [x + h, h - y] },
 }
 
 export function getStickerString(state: CubeState): string {

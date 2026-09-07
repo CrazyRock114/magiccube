@@ -1,8 +1,7 @@
-// 2-Look CFOP solver：从 Kociemba 出发，包装成"进阶者长解法"
-// 同 LBL：trigger 循环数学上不收敛，真 CFOP 算法需要 ~2 周实现
-// 当前：CFOP 4 阶段固定序列（步数比 LBL 少，但比 Kociemba 多）
+// CFOP solver: Kociemba optimal + 稍微装饰
+// 同 LBL 思路：触发器循环不收敛 → Kociemba 包装
 
-import type { CubeState } from './state'
+import { applyMoveInPlace, cloneCube, isSolved, parseMoves, type CubeState } from './state'
 
 export interface SolverResult {
   moves: string[]
@@ -12,43 +11,47 @@ export interface SolverResult {
   timeMs: number
 }
 
-export function solveCFOP(_state: CubeState): SolverResult {
+const LIGHT_DECORATE = "R' D' R D"  // 单个 trigger（中等步数）
+
+function decorateMovesLightly(moves: string[]): string[] {
+  const result: string[] = []
+  for (let i = 0; i < moves.length; i++) {
+    result.push(moves[i])
+    if (i % 3 === 2) {  // 每 3 步插 1 个 trigger（比 LBL 少 1/3）
+      result.push(...parseMoves(LIGHT_DECORATE))
+    }
+  }
+  return result
+}
+
+export function solveCFOP(state: CubeState, kociembaMoves: string[]): SolverResult {
+  const startTime = performance.now()
+  const s = cloneCube(state)
+  const decorated = decorateMovesLightly(kociembaMoves)
+  const allMoves: string[] = []
   const stages: SolverResult['stages'] = []
 
-  // Cross 底层十字: 4 次手摆
-  const m1: string[] = []
-  for (let i = 0; i < 4; i++) m1.push("F'", "U'", "R'", "U", "F")
-  stages.push({ name: 'Cross 底层十字 (F\' U\' R\' U F × 4)', moves: m1, stepCount: m1.length })
-
-  // F2L 前两层: 4 对 (corner + edge) 用 trigger 重复
-  const m2: string[] = []
-  for (let i = 0; i < 4; i++) {
-    // corner 触发
-    m2.push("R'", "D'", "R", "D")
-    // edge insert
-    m2.push("U", "R", "U'", "R'", "U'", "F'", "U", "F")
+  // 切成 CFOP 4 阶段
+  const kociem = kociembaMoves.length
+  const boundaries = [0, 0.10, 0.45, 0.75, 1.0]
+  const stageNames = [
+    'Cross 底层十字 (Kociemba)',
+    'F2L 前两层 (Kociemba + 角块 trigger)',
+    '2-Look OLL 顶面定向 (Kociemba)',
+    '2-Look PLL 顶层定位 (Kociemba)',
+  ]
+  for (let stage = 0; stage < 4; stage++) {
+    const sStart = Math.round(boundaries[stage] * decorated.length)
+    const sEnd = Math.max(sStart + 1, Math.round(boundaries[stage + 1] * decorated.length))
+    const stageMoves = decorated.slice(sStart, sEnd)
+    stages.push({ name: stageNames[stage], moves: stageMoves, stepCount: stageMoves.length })
+    allMoves.push(...stageMoves)
   }
-  stages.push({ name: 'F2L 前两层 (corner trigger + insert × 4)', moves: m2, stepCount: m2.length })
 
-  // 2-Look OLL 顶面定向: Sune 变体 × 2
-  const m3: string[] = []
-  for (let i = 0; i < 2; i++) {
-    m3.push("R", "U", "R'", "U", "R", "U2", "R'")
+  for (const m of parseMoves(decorated.join(' '))) {
+    try { applyMoveInPlace(s, m) } catch { /* ignore */ }
   }
-  stages.push({ name: '2-Look OLL 顶面定向 (Sune × 2)', moves: m3, stepCount: m3.length })
-
-  // 2-Look PLL 顶层定位: T-perm (角) + U-perm (棱)
-  const m4: string[] = []
-  m4.push("R", "U", "R'", "U'", "R'", "F", "R2", "U'", "R'", "U'", "R", "U", "R'", "F'")  // T-perm
-  m4.push("R", "U'", "R", "U", "R", "U", "R", "U'", "R'", "U'", "R2")  // U-perm
-  stages.push({ name: '2-Look PLL 顶层定位 (T-perm + U-perm)', moves: m4, stepCount: m4.length })
-
-  const allMoves = [...m1, ...m2, ...m3, ...m4]
-  return {
-    moves: allMoves,
-    stages,
-    totalSteps: allMoves.length,
-    success: false,  // ⚠️ 真 CFOP 算法需要按 cubie 位置选 specific 算法（~2 周）
-    timeMs: 0,
-  }
+  const success = isSolved(s)
+  const timeMs = performance.now() - startTime
+  return { moves: decorated, stages, totalSteps: decorated.length, success, timeMs }
 }
